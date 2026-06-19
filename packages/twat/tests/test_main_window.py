@@ -222,6 +222,38 @@ def test_project_context_menu_has_add_and_delete(qtbot, tmp_path: Path) -> None:
     assert actions == ["Add Session", "Rename Project…", "Delete Project"]
 
 
+def test_exited_session_context_menu_includes_repair(qtbot, tmp_path: Path) -> None:
+    svc = _service(tmp_path)
+    win = MainWindow(svc)
+    qtbot.addWidget(win)
+    proj = svc.add_project(tmp_path / "proj", name="Proj")
+    sess = svc.new_session(proj.id, name="FixMe")
+    win._refresh_tree()
+    win.select_session(sess.id)
+
+    assert "Repair Session" in win.session_context_actions()
+
+
+def test_repair_session_rewrites_hook(qtbot, tmp_path: Path, monkeypatch) -> None:
+    writes: list[str] = []
+    svc = _service(tmp_path)
+    win = MainWindow(svc)
+    qtbot.addWidget(win)
+    proj = svc.add_project(tmp_path / "proj", name="Proj")
+    sess = svc.new_session(proj.id, name="FixMe")
+    win._refresh_tree()
+    win.select_session(sess.id)
+
+    def _capture_write(path, version):  # type: ignore[no-untyped-def]
+        writes.append(str(path))
+
+    monkeypatch.setattr("twat.hook.generator.write_hook", _capture_write)
+    win._on_repair_session()
+
+    assert len(writes) == 1
+    assert writes[0] == str((tmp_path / "proj").resolve())
+
+
 def test_menubar_has_settings_entry(qtbot, tmp_path: Path) -> None:
     win = MainWindow(_service(tmp_path))
     qtbot.addWidget(win)

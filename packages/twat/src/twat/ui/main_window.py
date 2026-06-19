@@ -298,6 +298,8 @@ class MainWindow(QMainWindow, WindowActions):
                 menu.addAction("Archive", self._on_archive)
             if not running:
                 menu.addAction("Delete", self._on_delete_session)
+            if not sess.archived:
+                menu.addAction("Repair Session", self._on_repair_session)
         elif pid is not None:
             menu.addAction("Add Session", self._on_new_session)
             menu.addAction("Rename Project…", self._on_rename_project)

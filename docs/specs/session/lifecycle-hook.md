@@ -80,6 +80,8 @@ sequenceDiagram
   file.
 - Do not fake lifecycle integration — real pi events must drive the UI.
 - Do not let `/twat status` mutate state; it is read-only.
+- Repair session MUST force-rewrite `twat-hook.ts` at the current TWAT version,
+  gracefully Stop if running, then Start again (escape hatch for a stale hook).
 
 ## Acceptance criteria
 

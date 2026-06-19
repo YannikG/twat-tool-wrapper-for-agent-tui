@@ -234,6 +234,23 @@ class WindowActions:
             self._install_process_adapter()
             self._show_selected()
 
+    def _on_repair_session(self) -> None:
+        """Force-regenerate twat-hook.ts, stop if running, then Start again."""
+        sess = self._selected_session()
+        proj = self._selected_project()
+        if sess is None or proj is None or sess.archived:
+            return
+        from twat import __version__
+        from twat.hook.generator import write_hook
+
+        write_hook(proj.path, __version__)
+        _log.info("repair session %s: rewrote twat-hook in %s", sess.id, proj.path)
+        if self._is_running(sess):
+            self._service.stop_session(sess.id)
+            self._teardown_terminal(sess.id)
+            self._refresh_tree()
+        self._session_action("start")
+
     # state-awareness helper used by the context menu builder (host overrides
     # SessionState only for typing convenience)
     def _is_running(self, sess) -> bool:  # type: ignore[no-untyped-def]
