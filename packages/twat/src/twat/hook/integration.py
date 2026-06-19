@@ -24,7 +24,9 @@ class HookIntegration:
         self._service = service
         self._on_event = on_event  # optional UI callback (marshalled by caller)
         self._token = secrets.token_hex(16)
-        self._listener = HookListener(token=self._token, on_event=self._handle)
+        self._listener = HookListener(
+            token=self._token, on_event=self._handle, on_status=self._status_for
+        )
 
     @property
     def port(self) -> int:
@@ -59,3 +61,18 @@ class HookIntegration:
         if self._on_event is not None:
             # mypy: on_event is loosely typed to avoid importing Qt here
             self._on_event(event)  # type: ignore[operator]
+
+    def _status_for(self, session_id: str) -> dict[str, object] | None:
+        """Read-only session snapshot for the /twat status command."""
+        try:
+            sess = self._service.get_session(session_id)
+        except KeyError:
+            return None
+        return {
+            "id": sess.id,
+            "name": sess.name,
+            "state": sess.state.value,
+            "bound_file": sess.bound_file,
+            "archived": sess.archived,
+            "agent_activity": sess.agent_activity,
+        }

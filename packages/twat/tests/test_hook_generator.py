@@ -51,6 +51,15 @@ def test_render_hook_ignores_errors() -> None:
     assert "catch" in src
 
 
+def test_render_hook_registers_status_command() -> None:
+    src = render_hook(version="0.1.0")
+
+    # /twat status reports connection + session state from the /status endpoint
+    assert "twat-status" in src
+    assert "/status" in src
+    assert "ctx.ui.notify" in src
+
+
 def test_hook_path_is_in_project_extensions(tmp_path: Path) -> None:
     p = hook_path(str(tmp_path))
 

@@ -66,6 +66,10 @@ sequenceDiagram
   a name in TWAT.
 - TWAT MUST flip agent activity to `working`/`idle` from agent events.
 - TWAT MUST mark the session `exited` on `session_shutdown`.
+- TWAT MUST expose a localhost `/status` endpoint (token-validated) returning
+  the session's current state (id, name, state, bound file, archived, agent
+  activity) so the hook's `/twat status` command can report it in the pi
+  terminal.
 
 ## Must not
 
@@ -75,6 +79,7 @@ sequenceDiagram
 - Do not edit the user's `.gitignore`; document that the user may ignore the
   file.
 - Do not fake lifecycle integration — real pi events must drive the UI.
+- Do not let `/twat status` mutate state; it is read-only.
 
 ## Acceptance criteria
 

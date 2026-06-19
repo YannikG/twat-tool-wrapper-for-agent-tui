@@ -73,6 +73,39 @@ export default function (pi: ExtensionAPI) {{
       await emit({{ type: "name", name }});
     }},
   }});
+
+  // /twat status: report TWAT connection + session state in the pi terminal.
+  // Read-only; never mutates state. Best-effort: failures just notify.
+  pi.registerCommand("twat-status", {{
+    description: "Show this session's TWAT connection status",
+    handler: async (_args, ctx) => {{
+      if (!PORT || !TOKEN || !SESSION_ID) {{
+        ctx.ui.notify("TWAT: not running under TWAT (no hook env).", "warn");
+        return;
+      }}
+      try {{
+        const r = await fetch(`http://127.0.0.1:${{PORT}}/status?sessionId=${{SESSION_ID}}`, {{
+          headers: {{ "X-Twat-Token": TOKEN }},
+        }});
+        if (!r.ok) {{
+          ctx.ui.notify(`TWAT: status request failed (HTTP ${{r.status}}).`, "warn");
+          return;
+        }}
+        const s = (await r.json()) as Record<string, unknown>;
+        const lines = [
+          `TWAT session: ${{s.name ?? SESSION_ID}}`,
+          `  state: ${{s.state}}`,
+          `  agent: ${{s.agent_activity}}`,
+          `  archived: ${{s.archived}}`,
+          `  bound file: ${{s.bound_file ?? "(unbound)"}}`,
+          `  hook: connected (port ${{PORT}})`,
+        ];
+        ctx.ui.notify(lines.join("\n"), "info");
+      }} catch {{
+        ctx.ui.notify("TWAT: could not reach the TWAT listener.", "warn");
+      }}
+    }},
+  }});
 }}
 """
 

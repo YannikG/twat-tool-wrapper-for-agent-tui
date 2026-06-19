@@ -100,5 +100,63 @@ def test_listener_stop_is_idempotent() -> None:
     listener.stop()  # no error
 
 
+def _status(port: int, token: str, session_id: str) -> tuple[int, dict[str, object]]:
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/status?sessionId={session_id}",
+        headers={"X-Twat-Token": token},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=2) as r:
+            return r.status, json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        return e.code, {}
+
+
+def test_status_endpoint_returns_session_state() -> None:
+    def status_for(sid: str) -> dict[str, object]:
+        return {
+            "id": sid,
+            "name": "Auth",
+            "state": "running",
+            "bound_file": "/x.jsonl",
+            "archived": False,
+            "agent_activity": "idle",
+        }
+
+    listener = HookListener(token="secret", on_event=lambda _e: None, on_status=status_for)
+    listener.start()
+    try:
+        code, body = _status(listener.port, "secret", "s1")
+        assert code == 200
+        assert body["id"] == "s1"
+        assert body["state"] == "running"
+        assert body["bound_file"] == "/x.jsonl"
+    finally:
+        listener.stop()
+
+
+def test_status_endpoint_rejects_wrong_token() -> None:
+    listener = HookListener(
+        token="secret", on_event=lambda _e: None, on_status=lambda sid: {"id": sid}
+    )
+    listener.start()
+    try:
+        code, _ = _status(listener.port, "wrong", "s1")
+        assert code == 401
+    finally:
+        listener.stop()
+
+
+def test_status_endpoint_unknown_session_returns_404() -> None:
+    listener = HookListener(token="secret", on_event=lambda _e: None, on_status=lambda sid: None)
+    listener.start()
+    try:
+        code, _ = _status(listener.port, "secret", "ghost")
+        assert code == 404
+    finally:
+        listener.stop()
+
+
 _ = Path  # silence unused import linter across envs
 _ = threading

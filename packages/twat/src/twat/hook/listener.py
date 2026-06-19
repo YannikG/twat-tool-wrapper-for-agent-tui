@@ -16,14 +16,22 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 Event = dict[str, object]
 EventHandler = Callable[[Event], None]
+StatusProvider = Callable[[str], dict[str, object] | None]
 
 
 class HookListener:
     """A localhost-only HTTP listener receiving twat-hook events."""
 
-    def __init__(self, *, token: str, on_event: EventHandler) -> None:
+    def __init__(
+        self,
+        *,
+        token: str,
+        on_event: EventHandler,
+        on_status: StatusProvider | None = None,
+    ) -> None:
         self._token = token
         self._on_event = on_event
+        self._on_status = on_status
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
         self._port = 0
@@ -37,15 +45,53 @@ class HookListener:
             return
         token = self._token
         on_event = self._on_event
+        on_status = self._on_status
 
         class _Handler(BaseHTTPRequestHandler):
             def log_message(self, *_args: object) -> None:
                 pass  # silence stderr
 
-            def do_POST(self) -> None:
+            def _check_token(self) -> bool:
                 if self.headers.get("X-Twat-Token") != token:
                     self.send_response(401)
                     self.end_headers()
+                    return False
+                return True
+
+            def do_GET(self) -> None:
+                # /status?sessionId=<id> -> session state JSON (read-only).
+                if not self._check_token():
+                    return
+                if on_status is None:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                from urllib.parse import parse_qs, urlparse
+
+                parsed = urlparse(self.path)
+                if parsed.path != "/status":
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                sid = parse_qs(parsed.query).get("sessionId", [None])[0]
+                if not sid:
+                    self.send_response(400)
+                    self.end_headers()
+                    return
+                info = on_status(str(sid))
+                if info is None:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                body = json.dumps(info).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_POST(self) -> None:
+                if not self._check_token():
                     return
                 length = int(self.headers.get("Content-Length", "0") or "0")
                 raw = self.rfile.read(length) if length else b""
