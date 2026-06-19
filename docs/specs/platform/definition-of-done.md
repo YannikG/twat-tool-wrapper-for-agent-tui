@@ -24,6 +24,7 @@ of these items. An item is checked only when its slice is verified by a human.
 - [ ] A real terminal runs in-window for the selected project (login shell in
       the project folder; colors and TUI apps render).
 - [ ] User can create a new `pi` session for a project.
+- [ ] User can start/stop/terminate sessions (VM-style controls).
 - [ ] User can resume an existing known session for a project via Start.
 - [ ] Multiple sessions can stay open and be switched without losing state.
 - [ ] Session Rename changes from `pi` update the desktop UI.

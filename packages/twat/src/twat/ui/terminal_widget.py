@@ -149,6 +149,7 @@ class TerminalWidget(QWidget):
         rows, cols = self._size_in_cells()
         self._emu = TerminalEmulator(rows=max(1, rows), cols=max(1, cols))
         self._session: PtySession | None = None
+        self._owns_session = False
         self._reader: _Reader | None = None
 
     # -- lifecycle -----------------------------------------------------------
@@ -163,19 +164,45 @@ class TerminalWidget(QWidget):
         self.stop()
         rows, cols = self._emu.rows, self._emu.cols
         self._session = PtySession.spawn(argv, cwd=cwd, env=env, rows=rows, cols=cols)
+        self._owns_session = True
+        self._start_reader()
+        self.setFocus()
+
+    def attach(self, session: PtySession) -> None:
+        """Bind to an externally-owned PTY (e.g. the process adapter's)."""
+        self._detach_reader()
+        self._session = session
+        self._owns_session = False
+        if self._session is not None:
+            self._session.resize(rows=self._emu.rows, cols=self._emu.cols)
+        self._start_reader()
+        self.setFocus()
+
+    def detach(self) -> None:
+        """Unbind from an externally-owned PTY without closing it."""
+        self._detach_reader()
+        self._session = None
+        self._owns_session = False
+
+    def stop(self) -> None:
+        self._detach_reader()
+        if self._session is not None and self._owns_session:
+            self._session.close(force=True)
+        self._session = None
+        self._owns_session = False
+
+    def _start_reader(self) -> None:
+        if self._session is None:
+            return
         self._reader = _Reader(self._session)
         self._reader.data_read.connect(self._on_data)
         self._reader.finished.connect(self._on_finished)
         self._reader.start()
-        self.setFocus()
 
-    def stop(self) -> None:
+    def _detach_reader(self) -> None:
         if self._reader is not None:
             self._reader.stop()
             self._reader = None
-        if self._session is not None:
-            self._session.close(force=True)
-            self._session = None
 
     def is_running(self) -> bool:
         return self._session is not None and self._session.is_alive()

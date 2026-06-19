@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from twat.core.project import Project
+from twat.core.session import Session
 from twat.core.settings import Settings
 
 
@@ -23,23 +24,26 @@ class State:
     """All persisted TWAT state."""
 
     projects: list[Project] = field(default_factory=list)
+    sessions: list[Session] = field(default_factory=list)
     settings: Settings = field(default_factory=Settings)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "projects": [p.to_dict() for p in self.projects],
+            "sessions": [s.to_dict() for s in self.sessions],
             "settings": self.settings.to_dict(),
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> State:
         projects = [Project.from_dict(p) for p in data.get("projects", [])]
+        sessions = [Session.from_dict(s) for s in data.get("sessions", [])]
         settings_data = data.get("settings")
         if isinstance(settings_data, dict):
             settings = Settings.from_dict(settings_data)
         else:
             settings = Settings()
-        return cls(projects=projects, settings=settings)
+        return cls(projects=projects, sessions=sessions, settings=settings)
 
 
 class StateStore:

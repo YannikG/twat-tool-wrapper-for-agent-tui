@@ -14,7 +14,7 @@ from string import Template
 _THEMES_DIR = Path(__file__).parent / "themes"
 
 _QSS_TEMPLATE = Template("""
-* { font-family: "SF Pro Text", "Segoe UI", system-ui, sans-serif; font-size: 13px; }
+* { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 13px; }
 
 QMainWindow, QDialog { background-color: $bg; color: $text; }
 QWidget { color: $text; }
@@ -89,6 +89,24 @@ QStatusBar::item { border: none; }
 
 QFrame#PlaceholderPanel { background-color: $placeholder; }
 QFrame#SidebarFrame { background-color: $sidebar; }
+QFrame#ToolbarFrame { background-color: $panel; border-bottom: 1px solid $border; }
+QLabel#ToolbarContext { color: $text_dim; font-size: 12px; }
+
+QTreeWidget#SessionTree {
+    background-color: $sidebar;
+    color: $text;
+    border: none;
+    outline: 0;
+    padding: 4px 0px;
+}
+QTreeWidget::item { padding: 6px 4px; border-left: 3px solid transparent; }
+QTreeWidget::item:hover { background-color: $hover; }
+QTreeWidget::item:selected {
+    background-color: $selected;
+    color: $selected_text;
+    border-left: 3px solid $accent;
+}
+/* branch expand/collapse arrows: use native indicators (no override) */
 """)
 
 
