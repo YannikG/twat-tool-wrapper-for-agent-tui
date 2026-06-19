@@ -7,9 +7,10 @@ import os
 import sys
 from pathlib import Path
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from twat.app.service import AppService
+from twat.core.instance_lock import InstanceLockError, acquire
 from twat.core.store import StateStore
 from twat.ui.main_window import MainWindow
 from twat.ui.theme import apply_theme
@@ -63,6 +64,18 @@ def run() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("TWAT")
     app.setStyle("Fusion")
+
+    try:
+        lock = acquire(cfg)
+    except InstanceLockError as e:
+        log.warning("refusing second instance: %s", e)
+        QMessageBox.warning(
+            None,
+            "TWAT already running",
+            "Another TWAT instance is already running on this machine.",
+        )
+        sys.exit(1)
+    app.aboutToQuit.connect(lock.release)
 
     service = AppService(StateStore(cfg / "state.json"))
     apply_theme(app, service.settings.theme.value)

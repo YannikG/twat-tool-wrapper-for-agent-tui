@@ -7,6 +7,7 @@ operate on MainWindow state via self (typed loosely to avoid a circular import).
 from __future__ import annotations
 
 import logging
+import os
 
 from PySide6.QtWidgets import QFileDialog, QInputDialog, QMenu, QMessageBox
 
@@ -59,6 +60,7 @@ class WindowActions:
     def _start_session(self, sess) -> None:  # type: ignore[no-untyped-def]
         if self._adapter is None:
             return
+        self._hook_connected.discard(sess.id)
         term = self._terminal_by_session.get(sess.id)
         if term is None:
             from twat.ui.termqt_terminal import TermQtTerminal
@@ -87,6 +89,7 @@ class WindowActions:
         self._show_selected()
 
     def _teardown_terminal(self, session_id: str) -> None:
+        self._hook_connected.discard(session_id)
         term = self._terminal_by_session.pop(session_id, None)
         if term is not None:
             term.detach()
@@ -235,3 +238,36 @@ class WindowActions:
     # SessionState only for typing convenience)
     def _is_running(self, sess) -> bool:  # type: ignore[no-untyped-def]
         return sess.state in (SessionState.RUNNING, SessionState.STARTING)
+
+    def _hook_suffix(self, sess) -> str:  # type: ignore[no-untyped-def]
+        if sess.state in (SessionState.RUNNING, SessionState.STARTING):
+            return " ●" if sess.id in self._hook_connected else " ○"
+        return ""
+
+    def _quit_close(self, event: object) -> bool:
+        """Confirm quit and tear down sessions. Return False if the user cancels."""
+        running = [
+            s
+            for s in self._service.sessions_for_all()
+            if s.state in (SessionState.RUNNING, SessionState.STARTING) and not s.archived
+        ]
+        if running and os.environ.get("QT_QPA_PLATFORM") != "offscreen":
+            n = len(running)
+            word = "session" if n == 1 else "sessions"
+            btn = QMessageBox.question(
+                self,
+                "Quit TWAT",
+                f"{n} {word} still running. Stop them and quit?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if btn != QMessageBox.StandardButton.Yes:
+                event.ignore()  # type: ignore[attr-defined]
+                return False
+        if self._adapter is not None:
+            self._adapter.stop_all()
+        if self._hook is not None:
+            self._hook.stop()
+        for term in list(self._terminal_by_session.values()):
+            term.detach()
+        return True

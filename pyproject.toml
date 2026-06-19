@@ -43,7 +43,7 @@ disable_error_code = ["misc", "unused-ignore", "attr-defined", "index", "overrid
 # it does not own. Type-checking those would require a Protocol; the runtime
 # contract is enforced by MainWindow inheriting it.
 module = ["twat.ui.actions"]
-disable_error_code = ["attr-defined", "arg-type", "call-overload", "unused-ignore"]
+disable_error_code = ["attr-defined", "arg-type", "call-overload", "unused-ignore", "misc"]
 
 [tool.pytest.ini_options]
 testpaths = ["packages/twat/tests"]

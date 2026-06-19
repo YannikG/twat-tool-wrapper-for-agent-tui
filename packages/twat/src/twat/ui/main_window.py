@@ -62,6 +62,7 @@ class MainWindow(QMainWindow, WindowActions):
         self._terminal_by_session: dict[str, TermQtTerminal] = {}
         self._adapter: PiProcessAdapter | None = None
         self._hook: HookIntegration | None = None
+        self._hook_connected: set[str] = set()
         self._bridge = _EventBridge()
         self._bridge.event_received.connect(self._on_hook_event)
         self.setWindowTitle(_APP_TITLE)
@@ -449,6 +450,7 @@ class MainWindow(QMainWindow, WindowActions):
         sid = event.get("sessionId")
         _log.debug("hook event type=%s session=%s", event.get("type"), sid)
         if isinstance(sid, str):
+            self._hook_connected.add(sid)
             self._update_session_label(sid)
 
     def _update_session_label(self, session_id: str) -> None:
@@ -482,7 +484,7 @@ class MainWindow(QMainWindow, WindowActions):
     def _session_label(self, sess: Session) -> str:
         chip = _STATE_CHIP.get(sess.state, "?")
         activity = " ⋯" if sess.agent_activity == "working" else ""
-        return f"{chip}  {sess.name}{activity}"
+        return f"{chip}  {sess.name}{activity}{self._hook_suffix(sess)}"
 
     def _archive_session_label(self, sess: Session) -> str:
         # show project context so archived sessions stay identifiable across projects
@@ -491,12 +493,8 @@ class MainWindow(QMainWindow, WindowActions):
         return f"{sess.name}{ctx}"
 
     def closeEvent(self, event: object) -> None:
-        if self._adapter is not None:
-            self._adapter.stop_all()
-        if self._hook is not None:
-            self._hook.stop()
-        for term in list(self._terminal_by_session.values()):
-            term.detach()
+        if not self._quit_close(event):
+            return
         super().closeEvent(event)  # type: ignore[arg-type]
 
     # -- test helpers --------------------------------------------------------

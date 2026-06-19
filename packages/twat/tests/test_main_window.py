@@ -262,3 +262,49 @@ def test_open_in_menu_lists_available_editors_and_finder(
     # Finder/Terminal are always present on macOS.
     assert "Finder" in labels
     assert "Terminal" in labels
+
+
+# -- v1 polish: hook connection indicator + quit dialog ----------------------
+
+
+def test_session_label_shows_hook_connection_state(qtbot, tmp_path: Path) -> None:
+    svc = _service(tmp_path)
+    win = MainWindow(svc)
+    qtbot.addWidget(win)
+    proj = svc.add_project(tmp_path / "proj", name="Proj")
+    sess = svc.new_session(proj.id, name="Auth")
+    svc.start_session(sess.id)
+    running = svc.get_session(sess.id)
+
+    assert " ○" in win._session_label(running)
+    win._hook_connected.add(sess.id)
+    assert " ●" in win._session_label(running)
+
+
+def test_close_cancelled_when_user_declines_quit(qtbot, tmp_path: Path, monkeypatch) -> None:
+    import twat.ui.actions as actions_mod
+
+    svc = _service(tmp_path)
+    win = MainWindow(svc)
+    qtbot.addWidget(win)
+    proj = svc.add_project(tmp_path / "proj")
+    sess = svc.new_session(proj.id)
+    svc.start_session(sess.id)
+
+    ignored: list[bool] = []
+
+    class _Event:
+        def ignore(self) -> None:
+            ignored.append(True)
+
+        def accept(self) -> None:
+            pass
+
+    monkeypatch.setenv("QT_QPA_PLATFORM", "cocoa")
+    monkeypatch.setattr(
+        actions_mod.QMessageBox,
+        "question",
+        lambda *args, **kwargs: actions_mod.QMessageBox.StandardButton.No,
+    )
+    win.closeEvent(_Event())
+    assert ignored == [True]
