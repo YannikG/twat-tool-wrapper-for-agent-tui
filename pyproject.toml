@@ -1,0 +1,36 @@
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-qt>=4.4",
+    "pytest-timeout>=2.3",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["packages/twat/src", "packages/twat/tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]  # asserts are fine in tests
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["twat"]
+
+[[tool.mypy.overrides]]
+module = ["twat.ui.*", "twat.__main__"]
+strict = false
+
+[tool.pytest.ini_options]
+testpaths = ["packages/twat/tests"]
+addopts = "-ra"
+qt_api = "pyside6"

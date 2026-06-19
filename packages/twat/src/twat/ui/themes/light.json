@@ -1,0 +1,15 @@
+{
+  "bg": "#f6f7fa",
+  "surface": "#ffffff",
+  "sidebar": "#eceef3",
+  "panel": "#f6f7fa",
+  "placeholder": "#eceef3",
+  "text": "#1f2230",
+  "text_dim": "#6b7080",
+  "accent": "#3b6fd4",
+  "accent_text": "#ffffff",
+  "border": "#d7dbe4",
+  "hover": "#e3e6ee",
+  "selected": "#3b6fd4",
+  "selected_text": "#ffffff"
+}

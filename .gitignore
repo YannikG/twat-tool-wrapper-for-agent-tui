@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+
+# uv (uv.lock is tracked)
+.uv-cache/
+
+# Qt / app
+*.qmlc
+*.jsc
+
+# Tooling
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Scratch working memory
+.tmp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# graphify generated graph
+graphify-out/
