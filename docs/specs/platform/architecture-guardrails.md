@@ -78,5 +78,4 @@ uv run python scripts/ci/verify_doc_guardrails.py
 ## Related docs
 
 - [`./quality-gates.md`](./quality-gates.md)
-- [`./definition-of-done.md`](./definition-of-done.md)
 - [`../../../CONTEXT.md`](../../../CONTEXT.md)

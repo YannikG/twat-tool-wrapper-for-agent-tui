@@ -8,22 +8,44 @@ Local-first. No accounts, cloud sync, telemetry, teams, or remote backends.
 
 ## Status
 
-Pre-alpha. Scaffolding only — see [`CONTEXT.md`](./CONTEXT.md) for the domain
-language and [`docs/specs/platform/definition-of-done.md`](./docs/specs/platform/definition-of-done.md)
-for what "done" means.
+**v1 (macOS)** — usable via `uv run twat`. In-window terminal, project/session
+tree, Start/Stop/Terminate, lifecycle hook, archive/restore/delete, themes,
+instance lock, `/twat status` in pi.
 
-## Develop
+**Windows** — PTY via ConPTY (`pywinpty`); PyInstaller builds in CI (see below).
+
+Domain language: [`CONTEXT.md`](./CONTEXT.md). Manual test steps: [`docs/journeys/`](./docs/journeys/).
+
+## Run (development)
 
 Requires Python 3.12–3.13 and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-uv sync                       # set up the environment
-uv run pytest                 # tests
-uv run ruff check             # lint
-uv run mypy                   # types
+uv sync
+uv run twat
+```
+
+## Develop
+
+```bash
+uv sync
+uv run pytest                 # QT_QPA_PLATFORM=offscreen in CI
+uv run ruff check
+uv run mypy
 ```
 
 Headless Qt: `QT_QPA_PLATFORM=offscreen uv run pytest`.
 
-See [`docs/specs/platform/quality-gates.md`](./docs/specs/platform/quality-gates.md)
-for the full gate list.
+Quality gates: [`docs/specs/platform/quality-gates.md`](./docs/specs/platform/quality-gates.md).
+
+## Build (PyInstaller)
+
+Requires dev deps (`uv sync --group dev`). Produces a platform-native app bundle
+under `dist/` (macOS `.app`, Windows `.exe`).
+
+```bash
+uv run python scripts/build/pyinstaller/build.py
+```
+
+Release builds run on tag push via [`.github/workflows/release.yml`](./.github/workflows/release.yml)
+(macOS + Windows matrix).

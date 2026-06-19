@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            artifact: twat-macos
+          - os: windows-latest
+            artifact: twat-windows
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Sync environment (incl. dev + pyinstaller)
+        run: uv sync --group dev
+
+      - name: Install system Qt deps (Linux only, skipped on matrix)
+        if: false
+        run: echo "skipped"
+
+      - name: Build PyInstaller bundle
+        run: uv run python scripts/build/pyinstaller/build.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/
+          if-no-files-found: error

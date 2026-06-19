@@ -8,6 +8,7 @@ dev = [
     "pytest-timeout>=2.3",
     "ruff>=0.6",
     "mypy>=1.11",
+    "pyinstaller>=6.10",
 ]
 
 [tool.ruff]
@@ -31,7 +32,7 @@ module = ["twat.ui.*", "twat.__main__"]
 strict = false
 
 [[tool.mypy.overrides]]
-module = ["termqt", "termqt.*", "ptyprocess", "ptyprocess.*"]
+module = ["termqt", "termqt.*", "ptyprocess", "ptyprocess.*", "pywinpty", "pywinpty.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

@@ -28,9 +28,7 @@ Events TWAT consumes:
 - `turn_end` -> current name (rename backstop)
 - `session_shutdown` -> session exited (process ended)
 - Rename: intercept pi's native `/name` via the `input` event for instant
-  emission; if that does not fire for built-in commands, `/twat-rename` is the
-  canonical instant path (calls `pi.setSessionName()` + emits). The live test at
-  this slice decides which path is wired.
+  emission (`action: "handled"`); `/twat-rename` remains the explicit fallback.
 
 ```mermaid
 sequenceDiagram

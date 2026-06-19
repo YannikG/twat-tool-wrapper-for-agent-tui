@@ -63,6 +63,17 @@ export default function (pi: ExtensionAPI) {{
     await emit({{ type: "session_shutdown" }});
   }});
 
+  // Instant rename for pi's native `/name` (input intercept; /twat-rename still works).
+  pi.on("input", async (event, _ctx) => {{
+    const m = event.text.match(/^\\/name(?:\\s+(.+))?$/);
+    if (!m) return;
+    const name = (m[1] ?? "").trim();
+    if (!name) return;
+    pi.setSessionName(name);
+    await emit({{ type: "name", name }});
+    return {{ action: "handled" }};
+  }});
+
   // Rename: canonical instant path via /twat-rename.
   pi.registerCommand("twat-rename", {{
     description: "Rename this session in TWAT (usage: /twat-rename <name>)",

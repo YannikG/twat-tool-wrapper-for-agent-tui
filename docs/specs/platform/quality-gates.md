@@ -71,4 +71,4 @@ Run the commands above; CI runs the same set on push/PR.
 ## Related docs
 
 - [`./architecture-guardrails.md`](./architecture-guardrails.md)
-- [`./definition-of-done.md`](./definition-of-done.md)
+- [`../../../CONTEXT.md`](../../../CONTEXT.md)

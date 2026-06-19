@@ -51,7 +51,10 @@ def test_bound_session_paths_are_shell_quoted(monkeypatch) -> None:
 def test_windows_bound_uses_session_flag(monkeypatch) -> None:
     monkeypatch.setattr(sys, "platform", "win32")
     argv = _launcher_command("C:\\pi.exe", "C:\\sess.jsonl")
-    assert argv[0:2] == ["cmd.exe", "/c"]
-    assert "--resume" not in argv[2]
-    assert "--session" in argv[2]
-    assert "C:\\sess.jsonl" in argv[2]
+    assert argv == ["C:\\pi.exe", "--session", "C:\\sess.jsonl"]
+
+
+def test_windows_unbound_launches_plain_pi(monkeypatch) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    argv = _launcher_command("C:\\pi.exe", None)
+    assert argv == ["C:\\pi.exe"]

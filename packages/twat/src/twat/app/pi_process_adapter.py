@@ -28,8 +28,8 @@ def _launcher_command(pi_path: str, resume_file: str | None) -> list[str]:
     """
     if sys.platform == "win32":
         if resume_file:
-            return ["cmd.exe", "/c", f'"{pi_path}" --session "{resume_file}"']
-        return ["cmd.exe", "/c", f'"{pi_path}"']
+            return [pi_path, "--session", resume_file]
+        return [pi_path]
     shell = os.environ.get("SHELL") or "/bin/bash"
     # Bound session: resume that EXACT pi Session file. `pi --resume` ignores a
     # file arg and shows a picker; `pi --session <path>` loads the file directly.
