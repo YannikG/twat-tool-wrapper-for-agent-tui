@@ -5,6 +5,8 @@ description = "Tool Wrapper for Agent TUIs — a local-first desktop shell aroun
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "PySide6>=6.7,<7",
+    "pyte>=0.8.2",
+    "ptyprocess>=0.7",
 ]
 
 [build-system]

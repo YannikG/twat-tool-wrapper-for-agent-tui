@@ -20,6 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CORE_ROOTS = [
     REPO_ROOT / "packages" / "twat" / "src" / "twat" / "core",
     REPO_ROOT / "packages" / "twat" / "src" / "twat" / "app",
+    REPO_ROOT / "packages" / "twat" / "src" / "twat" / "terminal",
 ]
 FORBIDDEN = ("PySide6", "PyQt", "shiboken")
 
@@ -41,9 +42,10 @@ def main() -> int:
                 continue
             for lineno, line in enumerate(text.splitlines(), 1):
                 stripped = line.strip()
-                if stripped.startswith("#"):
+                # only check actual import statements, not docstrings/comments
+                if not stripped.startswith(("import ", "from ")):
                     continue
-                if any(f in line for f in FORBIDDEN) and ("import" in line):
+                if any(f in line for f in FORBIDDEN):
                     issues.append(f"{rel}:{lineno}: layer imports UI binding: {stripped}")
     if issues:
         print("Guardrail check failed (core/app must not import PySide6):", file=sys.stderr)
