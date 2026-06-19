@@ -12,17 +12,15 @@ import logging
 
 from PySide6.QtCore import QObject, QPoint, Qt, Signal
 from PySide6.QtWidgets import (
-    QFileDialog,
     QFrame,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QMainWindow,
     QMenu,
-    QMessageBox,
     QPushButton,
     QSplitter,
     QStackedWidget,
+    QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -30,13 +28,12 @@ from PySide6.QtWidgets import (
 )
 
 from twat.app.pi_process_adapter import PiProcessAdapter
-from twat.app.service import AppService, ProjectExistsError, SessionActiveError
-from twat.core.project import Project, suggest_name
+from twat.app.service import AppService
+from twat.core.project import Project
 from twat.core.session import Session, SessionState
 from twat.hook.integration import HookIntegration
-from twat.ui.settings_dialog import SettingsDialog
+from twat.ui.actions import WindowActions
 from twat.ui.termqt_terminal import TermQtTerminal
-from twat.ui.theme import apply_theme
 
 _PROJECT_ROLE = Qt.ItemDataRole.UserRole + 1
 _SESSION_ROLE = Qt.ItemDataRole.UserRole + 2
@@ -58,7 +55,7 @@ class _EventBridge(QObject):
     event_received = Signal(dict)
 
 
-class MainWindow(QMainWindow):
+class MainWindow(QMainWindow, WindowActions):
     def __init__(self, service: AppService) -> None:
         super().__init__()
         self._service = service
@@ -71,6 +68,8 @@ class MainWindow(QMainWindow):
         self.resize(1040, 660)
 
         self._install_process_adapter()
+
+        self._build_menubar()
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self._build_sidebar())
@@ -102,6 +101,15 @@ class MainWindow(QMainWindow):
             self._adapter = None
             self._service.process_adapter = _NoopAdapter()
 
+    def _build_menubar(self) -> None:
+        # App-level actions live in the menu bar, not the sidebar. The Settings
+        # dialog moved here from a sidebar button.
+        menubar = self.menuBar()
+        app_menu = menubar.addMenu("TWAT")
+        app_menu.addAction("Settings…", self._on_settings)
+        app_menu.addSeparator()
+        app_menu.addAction("Quit", self.close)
+
     def _build_sidebar(self) -> QWidget:
         frame = QFrame()
         frame.setObjectName("SidebarFrame")
@@ -109,33 +117,37 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(8)
 
-        header = QLabel("Projects")
-        header.setObjectName("SidebarHeader")
-        layout.addWidget(header)
+        self._tabs = QTabWidget()
+        self._tabs.setObjectName("SidebarTabs")
 
-        self._tree = QTreeWidget()
-        self._tree.setObjectName("SessionTree")
-        self._tree.setHeaderHidden(True)
-        self._tree.setIndentation(16)
-        self._tree.setUniformRowHeights(True)
-        self._tree.setExpandsOnDoubleClick(False)
-        self._tree.itemSelectionChanged.connect(self._on_selection_changed)
-        # Right-click context menus: sessions get Archive/Start/Stop/Terminate/
-        # Restore/Delete; projects get Add Session/Delete. (Start/Stop/Terminate
-        # also stay in the toolbar; the rest moved here from the toolbar.)
-        self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self._tree.customContextMenuRequested.connect(self._on_context_menu)
-        layout.addWidget(self._tree, 1)
+        # Sessions tab: projects + their active (non-archived) sessions.
+        self._tree = self._make_tree()
+        self._tabs.addTab(self._tree, "Sessions")
+
+        # Archive tab: archived sessions across all projects, flat list with
+        # project context in the label. Separate tab so active work stays focused.
+        self._archive_tree = self._make_tree()
+        self._tabs.addTab(self._archive_tree, "Archive")
+
+        layout.addWidget(self._tabs, 1)
 
         add_btn = QPushButton("+ Add Project")
         add_btn.clicked.connect(self._on_add_project)
         layout.addWidget(add_btn)
 
-        settings_btn = QPushButton("Settings")
-        settings_btn.clicked.connect(self._on_settings)
-        layout.addWidget(settings_btn)
-
         return frame
+
+    def _make_tree(self) -> QTreeWidget:
+        tree = QTreeWidget()
+        tree.setObjectName("SessionTree")
+        tree.setHeaderHidden(True)
+        tree.setIndentation(16)
+        tree.setUniformRowHeights(True)
+        tree.setExpandsOnDoubleClick(False)
+        tree.itemSelectionChanged.connect(self._on_selection_changed)
+        tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        tree.customContextMenuRequested.connect(lambda pos, t=tree: self._on_context_menu(t, pos))
+        return tree
 
     def _build_panel(self) -> QWidget:
         self._stack = QStackedWidget()
@@ -171,6 +183,8 @@ class MainWindow(QMainWindow):
         self._start_btn.clicked.connect(lambda: self._session_action("start"))
         self._stop_btn.clicked.connect(lambda: self._session_action("stop"))
         self._term_btn.clicked.connect(lambda: self._session_action("terminate"))
+        self._open_in_btn = QPushButton("Open in ▾")
+        self._open_in_btn.clicked.connect(self._on_open_in)
         self._ctx_label = QLabel("")
         self._ctx_label.setObjectName("ToolbarContext")
         tb_layout.addStretch(1)
@@ -179,6 +193,7 @@ class MainWindow(QMainWindow):
         tb_layout.addWidget(self._start_btn)
         tb_layout.addWidget(self._stop_btn)
         tb_layout.addWidget(self._term_btn)
+        tb_layout.addWidget(self._open_in_btn)
         sa_layout.addWidget(self._toolbar)
 
         self._terminal_host = QStackedWidget()
@@ -215,22 +230,19 @@ class MainWindow(QMainWindow):
             proj_item.setExpanded(True)
             for sess in self._service.sessions_for(proj.id):
                 if sess.archived:
-                    continue  # archived sessions live under the Archive node
+                    continue  # archived sessions live in the Archive tab
                 sess_item = QTreeWidgetItem([self._session_label(sess)])
                 sess_item.setData(0, _SESSION_ROLE, sess.id)
                 proj_item.addChild(sess_item)
             self._tree.addTopLevelItem(proj_item)
-        # Archive node: groups archived sessions across all projects. Only shown
-        # when there is at least one archived session.
+        # Archive tab: archived sessions across all projects, flat list with
+        # project context in the label (separate tab from active sessions).
+        self._archive_tree.clear()
         archived = [s for s in self._service.sessions_for_all() if s.archived]
-        if archived:
-            arch_item = QTreeWidgetItem(["Archive"])
-            arch_item.setExpanded(True)
-            for sess in archived:
-                sess_item = QTreeWidgetItem([self._archive_session_label(sess)])
-                sess_item.setData(0, _SESSION_ROLE, sess.id)
-                arch_item.addChild(sess_item)
-            self._tree.addTopLevelItem(arch_item)
+        for sess in archived:
+            sess_item = QTreeWidgetItem([self._archive_session_label(sess)])
+            sess_item.setData(0, _SESSION_ROLE, sess.id)
+            self._archive_tree.addTopLevelItem(sess_item)
         _log.debug(
             "refresh_tree: projects=%d active=%d archived=%d selected=%s",
             len(self._service.projects),
@@ -246,21 +258,22 @@ class MainWindow(QMainWindow):
         self._show_selected()
         self._update_controls()
 
-    def _on_context_menu(self, pos: QPoint) -> None:
-        """Right-click menu on the tree.
+    def _on_context_menu(self, tree: QTreeWidget, pos: QPoint) -> None:
+        """Right-click menu on either tree.
 
         Session items: Start/Stop + Terminate + Archive/Restore + Delete
-        (state-aware). Project items: Add Session + Delete Project. Selecting
-        the right-clicked item first lets the shared handlers operate on it.
+        (state-aware). Project items: Add Session + Rename + Delete Project.
+        Selecting the right-clicked item first lets the shared handlers operate
+        on it.
         """
-        item = self._tree.itemAt(pos)
+        item = tree.itemAt(pos)
         if item is None:
             return
-        self._tree.setCurrentItem(item)
+        tree.setCurrentItem(item)
         menu = self._build_context_menu()
         if menu is None:
             return
-        menu.exec(self._tree.viewport().mapToGlobal(pos))
+        menu.exec(tree.viewport().mapToGlobal(pos))
 
     def _build_context_menu(self) -> QMenu | None:
         """Build the right-click menu for the currently selected tree item."""
@@ -275,7 +288,8 @@ class MainWindow(QMainWindow):
             if running:
                 menu.addAction("Stop", lambda: self._session_action("stop"))
                 menu.addAction("Terminate", lambda: self._session_action("terminate"))
-            else:
+            elif not sess.archived:
+                # archived sessions are stopped; Restore first, then Start.
                 menu.addAction("Start", lambda: self._session_action("start"))
             if sess.archived:
                 menu.addAction("Restore", self._on_restore)
@@ -285,13 +299,20 @@ class MainWindow(QMainWindow):
                 menu.addAction("Delete", self._on_delete_session)
         elif pid is not None:
             menu.addAction("Add Session", self._on_new_session)
+            menu.addAction("Rename Project…", self._on_rename_project)
             menu.addAction("Delete Project", self._on_delete_project)
         else:
             return None
         return menu
 
+    def _active_tree(self) -> QTreeWidget:
+        """The currently visible sidebar tree (Sessions or Archive tab)."""
+        if self._tabs.currentWidget() is self._archive_tree:
+            return self._archive_tree
+        return self._tree
+
     def _selected_project_id(self) -> str | None:
-        item = self._tree.currentItem()
+        item = self._active_tree().currentItem()
         if item is None:
             return None
         pid = item.data(0, _PROJECT_ROLE)
@@ -308,7 +329,7 @@ class MainWindow(QMainWindow):
         return None
 
     def _selected_session_id(self) -> str | None:
-        item = self._tree.currentItem()
+        item = self._active_tree().currentItem()
         if item is None:
             return None
         sid = item.data(0, _SESSION_ROLE)
@@ -324,7 +345,7 @@ class MainWindow(QMainWindow):
             return None
 
     def _selected_project(self) -> Project | None:
-        item = self._tree.currentItem()
+        item = self._active_tree().currentItem()
         if item is None:
             return None
         pid = item.data(0, _PROJECT_ROLE)
@@ -419,170 +440,6 @@ class MainWindow(QMainWindow):
         self._stop_btn.setEnabled(running)
         self._term_btn.setEnabled(running)
 
-    def _session_action(self, action: str) -> None:
-        sess = self._selected_session()
-        if sess is None:
-            return
-        try:
-            if action == "start":
-                self._start_session(sess)
-            elif action == "stop":
-                self._service.stop_session(sess.id)
-                self._teardown_terminal(sess.id)
-            elif action == "terminate":
-                self._service.terminate_session(sess.id)
-                self._teardown_terminal(sess.id)
-        except Exception as e:  # surface process/launch errors to the user
-            QMessageBox.warning(self, "Session error", str(e))
-        # Update the affected session in place. Never rebuild the tree here: a
-        # rebuild steals focus from the terminal mid-keystroke. After Start the
-        # terminal already has focus, so skip _show_selected for that action.
-        self._update_session_label(sess.id)
-        self._update_controls()
-        if action != "start":
-            self._show_selected()
-
-    def _start_session(self, sess: Session) -> None:
-        if self._adapter is None:
-            return
-        term = self._terminal_by_session.get(sess.id)
-        if term is None:
-            term = TermQtTerminal(parent=self._session_area)
-            self._terminal_by_session[sess.id] = term
-            self._terminal_host.addWidget(term)
-        if self._hook is not None:
-            self._adapter.set_hook_env_for(sess.id, self._hook.env_for(sess.id))
-        self._service.start_session(sess.id)
-        pty = self._adapter.pty(sess.id)
-        if pty is not None:
-            term.attach(pty, on_finished=lambda sid=sess.id: self._on_terminal_finished(sid))  # type: ignore[misc]
-        self._terminal_host.setCurrentWidget(term)
-        self._focus_terminal(term)
-
-    def _on_terminal_finished(self, session_id: str) -> None:
-        _log.info("terminal finished session=%s", session_id)
-        try:
-            self._service.stop_session(session_id)
-        except KeyError:
-            _log.warning("terminal finished for unknown session %s", session_id)
-            return
-        self._teardown_terminal(session_id)
-        self._refresh_tree()
-        self._show_selected()
-
-    def _teardown_terminal(self, session_id: str) -> None:
-        term = self._terminal_by_session.pop(session_id, None)
-        if term is not None:
-            term.detach()
-            self._terminal_host.removeWidget(term)
-            term.deleteLater()
-
-    def _on_new_session(self) -> None:
-        proj = self._selected_project()
-        if proj is None:
-            _log.warning("new_session clicked but no project selected")
-            return
-        sess = self._service.new_session(proj.id)
-        _log.info("new session created id=%s; refreshing tree", sess.id)
-        self._refresh_tree()
-        self._select_session(sess.id)
-
-    def _on_archive(self) -> None:
-        sess = self._selected_session()
-        if sess is None:
-            return
-        try:
-            self._service.archive_session(sess.id)
-        except Exception as e:  # surface process/launch errors to the user
-            QMessageBox.warning(self, "Session error", str(e))
-            return
-        self._teardown_terminal(sess.id)
-        self._refresh_tree()
-        self._show_selected()
-
-    def _on_restore(self) -> None:
-        sess = self._selected_session()
-        if sess is None:
-            return
-        self._service.restore_session(sess.id)
-        self._refresh_tree()
-        self._select_session(sess.id)
-
-    def _on_delete_session(self) -> None:
-        sess = self._selected_session()
-        if sess is None:
-            return
-        confirm = QMessageBox.question(
-            self,
-            "Delete session",
-            f"Delete session '{sess.name}'?\n\n"
-            "This removes it from TWAT. The pi conversation file on disk is kept.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if confirm != QMessageBox.StandardButton.Yes:
-            return
-        try:
-            self._service.delete_session(sess.id)
-        except SessionActiveError as e:
-            _log.warning("delete session refused (active): %s", e)
-            QMessageBox.warning(self, "Cannot delete", str(e))
-            return
-        _log.info("deleted session %s via UI", sess.id)
-        self._teardown_terminal(sess.id)
-        self._refresh_tree()
-        self._show_selected()
-
-    def _on_delete_project(self) -> None:
-        proj = self._selected_project()
-        if proj is None:
-            return
-        n = len(self._service.sessions_for(proj.id))
-        confirm = QMessageBox.question(
-            self,
-            "Delete project",
-            f"Delete project '{proj.name}' and all its sessions ({n})?\n\n"
-            "Running sessions are stopped first.\n"
-            "The folder and pi conversations are NOT deleted.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if confirm != QMessageBox.StandardButton.Yes:
-            return
-        # tear down any live terminals for this project's sessions
-        for sid in [s.id for s in self._service.sessions_for(proj.id)]:
-            self._teardown_terminal(sid)
-        try:
-            self._service.delete_project(proj.id)
-        except Exception as e:  # surface errors to the user
-            QMessageBox.warning(self, "Project error", str(e))
-            return
-        self._refresh_tree()
-        self._show_selected()
-
-    def _on_add_project(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Add Project Folder")
-        if not folder:
-            return
-        default_name = suggest_name(folder)
-        name, ok = QInputDialog.getText(self, "Project Name", "Project name:", text=default_name)
-        if not ok:
-            return
-        try:
-            self._service.add_project(folder, name=name.strip() or default_name)
-        except ProjectExistsError:
-            QMessageBox.warning(self, "Project exists", "That folder is already added.")
-            return
-        self._refresh_tree()
-
-    def _on_settings(self) -> None:
-        dialog = SettingsDialog(self._service, parent=self)
-        if dialog.exec():
-            apply_theme(self._app(), self._service.settings.theme.value)
-            self._status.showMessage(self._pi_status_text())
-            self._install_process_adapter()
-            self._show_selected()
-
     def _on_hook_event(self, event: dict[str, object]) -> None:
         """Main-thread handler for hook events.
 
@@ -600,7 +457,9 @@ class MainWindow(QMainWindow):
             sess = self._service.get_session(session_id)
         except KeyError:
             return
-        # find the tree item and update its text in place
+        active_label = self._session_label(sess)
+        archive_label = self._archive_session_label(sess)
+        # update in the active (sessions) tree if present
         for i in range(self._tree.topLevelItemCount()):
             parent = self._tree.topLevelItem(i)
             if parent is None:
@@ -608,8 +467,14 @@ class MainWindow(QMainWindow):
             for j in range(parent.childCount()):
                 child = parent.child(j)
                 if child is not None and child.data(0, _SESSION_ROLE) == session_id:
-                    child.setText(0, self._session_label(sess))
+                    child.setText(0, active_label)
                     break
+        # update in the archive tree (flat top-level items)
+        for i in range(self._archive_tree.topLevelItemCount()):
+            item = self._archive_tree.topLevelItem(i)
+            if item is not None and item.data(0, _SESSION_ROLE) == session_id:
+                item.setText(0, archive_label)
+                break
         # update toolbar context + control enabled state for the active session
         if session_id == self._selected_session_id():
             self._update_controls()
@@ -658,16 +523,10 @@ class MainWindow(QMainWindow):
 
     def archive_labels(self) -> list[str]:
         names: list[str] = []
-        for i in range(self._tree.topLevelItemCount()):
-            item = self._tree.topLevelItem(i)
-            if item is None or item.data(0, _PROJECT_ROLE) is not None:
-                continue  # skip project nodes; Archive node has no project role
-            if item.text(0) != "Archive":
-                continue
-            for j in range(item.childCount()):
-                child = item.child(j)
-                if child is not None:
-                    names.append(child.text(0))
+        for i in range(self._archive_tree.topLevelItemCount()):
+            item = self._archive_tree.topLevelItem(i)
+            if item is not None:
+                names.append(item.text(0))
         return names
 
     def _context_action_texts(self) -> list[str]:
@@ -683,6 +542,7 @@ class MainWindow(QMainWindow):
         return self._context_action_texts()
 
     def select_project(self, project_id: str) -> None:
+        self._tabs.setCurrentWidget(self._tree)
         for i in range(self._tree.topLevelItemCount()):
             item = self._tree.topLevelItem(i)
             if item is not None and item.data(0, _PROJECT_ROLE) == project_id:
@@ -699,14 +559,24 @@ class MainWindow(QMainWindow):
         return str(self._panel_subtitle.text())
 
     def _select_session(self, session_id: str) -> None:
-        for i in range(self._tree.topLevelItemCount()):
-            parent = self._tree.topLevelItem(i)
-            if parent is None:
-                continue
-            for j in range(parent.childCount()):
-                child = parent.child(j)
-                if child is not None and child.data(0, _SESSION_ROLE) == session_id:
-                    self._tree.setCurrentItem(child)
+        # Sessions can be in either tree; check both.
+        for tree in (self._tree, self._archive_tree):
+            for i in range(tree.topLevelItemCount()):
+                parent = tree.topLevelItem(i)
+                if parent is None:
+                    continue
+                # session node (active tree) or top-level (archive tree)
+                for j in range(parent.childCount()):
+                    child = parent.child(j)
+                    if child is not None and child.data(0, _SESSION_ROLE) == session_id:
+                        self._tabs.setCurrentWidget(tree)
+                        tree.setCurrentItem(child)
+                        return
+                # archive tree: session is a top-level item
+                if parent.data(0, _SESSION_ROLE) == session_id:
+                    self._tabs.setCurrentWidget(tree)
+                    tree.setCurrentItem(parent)
+                    return
                     return
 
     def _app(self) -> object:

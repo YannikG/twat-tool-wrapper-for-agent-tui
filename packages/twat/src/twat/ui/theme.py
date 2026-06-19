@@ -84,6 +84,36 @@ QScrollBar::handle:vertical:hover { background: $accent; }
 QScrollBar::add-line, QScrollBar::sub-line { height: 0; }
 QScrollBar::add-page, QScrollBar::sub-page { background: none; }
 
+QMenuBar { background-color: $bg; color: $text; border-bottom: 1px solid $border; }
+QMenuBar::item { background-color: transparent; padding: 4px 10px; border-radius: 4px; }
+QMenuBar::item:selected { background-color: $hover; }
+QMenuBar::item:pressed { background-color: $selected; color: $selected_text; }
+
+QMenu { background-color: $surface; color: $text; border: 1px solid $border; padding: 4px; }
+QMenu::item { padding: 6px 22px; border-radius: 4px; }
+QMenu::item:disabled { color: $text_dim; }
+QMenu::item:selected { background-color: $selected; color: $selected_text; }
+QMenu::separator { height: 1px; background-color: $border; margin: 4px 8px; }
+
+QTabWidget::pane { border: none; top: -1px; }
+QTabBar { background-color: transparent; }
+QTabBar::tab {
+    background-color: $sidebar;
+    color: $text_dim;
+    border: 1px solid $border;
+    border-bottom: none;
+    padding: 6px 14px;
+    border-top-left-radius: 5px;
+    border-top-right-radius: 5px;
+    margin-right: 2px;
+}
+QTabBar::tab:selected { background-color: $surface; color: $text; }
+QTabBar::tab:hover:!selected { background-color: $hover; color: $text; }
+
+QToolTip { background-color: $surface; color: $text; border: 1px solid $border; padding: 4px 6px; }
+
+QInputDialog QLabel, QMessageBox QLabel { color: $text; }
+
 QStatusBar { background-color: $sidebar; color: $text_dim; }
 QStatusBar::item { border: none; }
 

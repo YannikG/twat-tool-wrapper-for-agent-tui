@@ -84,6 +84,21 @@ class AppService:
         self._state.settings.pi_path = path
         self._save()
 
+    # -- projects -----------------------------------------------------------
+
+    def rename_project(self, project_id: str, name: str) -> None:
+        """Set a project's display name. The folder path is never touched."""
+        name = name.strip()
+        if not name:
+            raise ValueError("project name must not be empty")
+        for i, p in enumerate(self._state.projects):
+            if p.id == project_id:
+                self._state.projects[i] = Project(id=p.id, path=p.path, name=name)
+                self._save()
+                _log.info("renamed project %s -> %r", project_id, name)
+                return
+        raise KeyError(project_id)
+
     # -- sessions -----------------------------------------------------------
 
     def sessions_for(self, project_id: str) -> list[Session]:

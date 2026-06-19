@@ -43,3 +43,6 @@ jobs:
 
       - name: Architecture guardrails
         run: uv run python scripts/ci/verify_doc_guardrails.py
+
+      - name: LOC limit
+        run: uv run python scripts/ci/verify_loc_limit.py

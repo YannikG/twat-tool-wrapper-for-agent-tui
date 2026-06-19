@@ -38,6 +38,13 @@ ignore_missing_imports = true
 module = ["twat.ui.termqt_terminal"]
 disable_error_code = ["misc", "unused-ignore", "attr-defined", "index", "override", "arg-type", "assignment", "operator"]
 
+[[tool.mypy.overrides]]
+# WindowActions is a mixin: it references host (MainWindow) attributes/methods
+# it does not own. Type-checking those would require a Protocol; the runtime
+# contract is enforced by MainWindow inheriting it.
+module = ["twat.ui.actions"]
+disable_error_code = ["attr-defined", "arg-type", "call-overload", "unused-ignore"]
+
 [tool.pytest.ini_options]
 testpaths = ["packages/twat/tests"]
 addopts = "-ra"

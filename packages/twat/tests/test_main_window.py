@@ -5,6 +5,7 @@ from pathlib import Path
 from twat.app.service import AppService
 from twat.core.store import StateStore
 from twat.ui.main_window import MainWindow
+from twat.ui.open_in import open_in_targets
 
 
 def _service(tmp_path: Path) -> AppService:
@@ -206,7 +207,7 @@ def test_session_context_menu_actions_are_state_aware(qtbot, tmp_path: Path) -> 
     assert "Restore" in actions
     assert "Delete" in actions
     assert "Archive" not in actions  # already archived
-    assert "Start" in actions  # stopped -> Start offered
+    assert "Start" not in actions  # archived -> Restore first, no Start
 
 
 def test_project_context_menu_has_add_and_delete(qtbot, tmp_path: Path) -> None:
@@ -218,4 +219,46 @@ def test_project_context_menu_has_add_and_delete(qtbot, tmp_path: Path) -> None:
     win.select_project(proj.id)
 
     actions = win.project_context_actions()
-    assert actions == ["Add Session", "Delete Project"]
+    assert actions == ["Add Session", "Rename Project…", "Delete Project"]
+
+
+def test_menubar_has_settings_entry(qtbot, tmp_path: Path) -> None:
+    win = MainWindow(_service(tmp_path))
+    qtbot.addWidget(win)
+
+    labels: list[str] = []
+    for action in win.menuBar().actions():
+        labels.append(action.text())
+        menu = action.menu()
+        if menu is not None:
+            for child in menu.actions():
+                labels.append(child.text())
+    # Settings moved out of the sidebar into a menu-bar entry.
+    assert any("Settings" in lbl for lbl in labels)
+
+
+def test_open_in_menu_lists_available_editors_and_finder(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    # No macOS app bundles, no CLI shims -> editors absent; Finder/Terminal
+    # always present. (open_in detection lives in twat.ui.open_in.)
+    import twat.ui.open_in as oi
+
+    monkeypatch.setattr(oi, "_mac_app_available", lambda app: False)
+    monkeypatch.setattr(oi.shutil, "which", lambda exe: None)
+    monkeypatch.setattr(oi.sys, "platform", "darwin")
+    win = MainWindow(_service(tmp_path))
+    qtbot.addWidget(win)
+    proj = win._service.add_project(tmp_path / "proj", name="Proj")
+    win._refresh_tree()
+    win.select_project(proj.id)
+
+    labels = [t[0] for t in open_in_targets()]
+
+    assert "VS Code" not in labels
+    assert "WebStorm" not in labels
+    assert "PyCharm" not in labels
+    assert "Rider" not in labels
+    # Finder/Terminal are always present on macOS.
+    assert "Finder" in labels
+    assert "Terminal" in labels
