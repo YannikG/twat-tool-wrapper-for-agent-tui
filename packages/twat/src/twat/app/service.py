@@ -119,6 +119,21 @@ class AppService:
         """Internal seam for the hook to report a name (slice 4)."""
         self._replace(self.get_session(session_id).with_name(name))
 
+    def _set_session_agent_activity(self, session_id: str, activity: str) -> None:
+        """Internal seam for the hook to report agent activity (slice 4)."""
+        self._replace(self.get_session(session_id).with_agent_activity(activity))
+
+    def mark_session_exited(self, session_id: str) -> None:
+        """Mark a session exited (idempotent) without touching the PTY.
+
+        Used by the hook's session_shutdown event; the reader's finished signal
+        owns actual terminal teardown.
+        """
+        sess = self.get_session(session_id)
+        if sess.state is SessionState.EXITED:
+            return
+        self._replace(sess.with_state(SessionState.EXITED))
+
     def _replace(self, session: Session) -> None:
         for i, s in enumerate(self._state.sessions):
             if s.id == session.id:

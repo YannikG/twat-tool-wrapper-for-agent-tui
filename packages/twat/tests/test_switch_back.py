@@ -47,10 +47,10 @@ def test_reselect_running_session_shows_its_terminal(qtbot, tmp_path: Path) -> N
     win._refresh_tree()
 
     # fake "start": register a terminal widget for each (without real pi)
-    from twat.ui.terminal_widget import TerminalWidget
+    from twat.ui.termqt_terminal import TermQtTerminal
 
     for s in (a, b):
-        term = TerminalWidget(parent=win._session_area)
+        term = TermQtTerminal(parent=win._session_area)
         win._terminal_by_session[s.id] = term
         win._terminal_host.addWidget(term)
 

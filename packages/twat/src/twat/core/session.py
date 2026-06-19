@@ -31,6 +31,7 @@ class Session:
     name: str
     state: SessionState
     bound_file: str | None = None  # pi Session file; None until the hook reports it
+    agent_activity: str = "idle"  # "idle" | "working"; ephemeral, from hook events
 
     def with_state(self, state: SessionState) -> Session:
         return Session(
@@ -39,6 +40,7 @@ class Session:
             name=self.name,
             state=state,
             bound_file=self.bound_file,
+            agent_activity=self.agent_activity,
         )
 
     def with_bound_file(self, path: str) -> Session:
@@ -48,6 +50,7 @@ class Session:
             name=self.name,
             state=self.state,
             bound_file=path,
+            agent_activity=self.agent_activity,
         )
 
     def with_name(self, name: str) -> Session:
@@ -57,6 +60,17 @@ class Session:
             name=name,
             state=self.state,
             bound_file=self.bound_file,
+            agent_activity=self.agent_activity,
+        )
+
+    def with_agent_activity(self, activity: str) -> Session:
+        return Session(
+            id=self.id,
+            project_id=self.project_id,
+            name=self.name,
+            state=self.state,
+            bound_file=self.bound_file,
+            agent_activity=activity,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -66,6 +80,7 @@ class Session:
             "name": self.name,
             "state": self.state.value,
             "bound_file": self.bound_file,
+            "agent_activity": self.agent_activity,
         }
 
     @classmethod
@@ -76,6 +91,7 @@ class Session:
             name=str(data["name"]),
             state=SessionState(str(data["state"])),
             bound_file=data.get("bound_file"),
+            agent_activity=str(data.get("agent_activity", "idle")),
         )
 
 

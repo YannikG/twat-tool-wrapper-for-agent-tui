@@ -28,6 +28,7 @@ of these items. An item is checked only when its slice is verified by a human.
 - [ ] User can resume an existing known session for a project via Start.
 - [ ] Multiple sessions can stay open and be switched without losing state.
 - [ ] Session Rename changes from `pi` update the desktop UI.
+- [ ] Real pi lifecycle events drive binding, agent activity, and exit.
 - [ ] User can archive and restore sessions.
 - [ ] Dark/light mode works.
 - [ ] `pi` path is autodiscovered, prefilled, and can be overridden with a

@@ -35,7 +35,7 @@ class PtySession:
     ) -> PtySession:
         if sys.platform == "win32":
             raise NotImplementedError("Windows PTY arrives in a later slice")
-        from ptyprocess import PtyProcess  # type: ignore[import-untyped]
+        from ptyprocess import PtyProcess
 
         proc = PtyProcess.spawn(
             argv,

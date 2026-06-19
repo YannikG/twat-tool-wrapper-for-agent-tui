@@ -8,7 +8,7 @@ Terminate + New Session live in a toolbar above the terminal.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -30,8 +30,9 @@ from twat.app.pi_process_adapter import PiProcessAdapter
 from twat.app.service import AppService, ProjectExistsError
 from twat.core.project import Project, suggest_name
 from twat.core.session import Session, SessionState
+from twat.hook.integration import HookIntegration
 from twat.ui.settings_dialog import SettingsDialog
-from twat.ui.terminal_widget import TerminalWidget
+from twat.ui.termqt_terminal import TermQtTerminal
 from twat.ui.theme import apply_theme
 
 _PROJECT_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -46,12 +47,21 @@ _STATE_CHIP = {
 }
 
 
+class _EventBridge(QObject):
+    """Marshals hook events (listener thread) to the Qt main thread."""
+
+    event_received = Signal(dict)
+
+
 class MainWindow(QMainWindow):
     def __init__(self, service: AppService) -> None:
         super().__init__()
         self._service = service
-        self._terminal_by_session: dict[str, TerminalWidget] = {}
+        self._terminal_by_session: dict[str, TermQtTerminal] = {}
         self._adapter: PiProcessAdapter | None = None
+        self._hook: HookIntegration | None = None
+        self._bridge = _EventBridge()
+        self._bridge.event_received.connect(self._on_hook_event)
         self.setWindowTitle(_APP_TITLE)
         self.resize(1040, 660)
 
@@ -71,9 +81,21 @@ class MainWindow(QMainWindow):
         self._refresh_tree()
 
     def _install_process_adapter(self) -> None:
+        from twat import __version__
+
         pi_path = self._service.settings.pi_path
-        self._adapter = PiProcessAdapter(pi_path) if pi_path else None
-        self._service.process_adapter = self._adapter if self._adapter else _NoopAdapter()
+        # stop any previous hook listener
+        if self._hook is not None:
+            self._hook.stop()
+            self._hook = None
+        if pi_path:
+            self._adapter = PiProcessAdapter(pi_path, version=__version__)
+            self._service.process_adapter = self._adapter
+            self._hook = HookIntegration(self._service, on_event=self._bridge.event_received.emit)
+            self._hook.start()
+        else:
+            self._adapter = None
+            self._service.process_adapter = _NoopAdapter()
 
     def _build_sidebar(self) -> QWidget:
         frame = QFrame()
@@ -185,8 +207,7 @@ class MainWindow(QMainWindow):
             proj_item.setData(0, _PROJECT_ROLE, proj.id)
             proj_item.setExpanded(True)
             for sess in self._service.sessions_for(proj.id):
-                chip = _STATE_CHIP.get(sess.state, "?")
-                sess_item = QTreeWidgetItem([f"{chip}  {sess.name}"])
+                sess_item = QTreeWidgetItem([self._session_label(sess)])
                 sess_item.setData(0, _SESSION_ROLE, sess.id)
                 proj_item.addChild(sess_item)
             self._tree.addTopLevelItem(proj_item)
@@ -250,13 +271,26 @@ class MainWindow(QMainWindow):
         self._stack.setCurrentWidget(self._session_area)
         self._ctx_label.setText(f"{sess.name} · {proj.name}" if proj else sess.name)
         if sess.id in self._terminal_by_session:
-            self._terminal_host.setCurrentWidget(self._terminal_by_session[sess.id])
-            self._terminal_by_session[sess.id].setFocus()
+            term = self._terminal_by_session[sess.id]
+            self._terminal_host.setCurrentWidget(term)
+            self._focus_terminal(term)
         else:
             self._show_session_placeholder(sess, proj)
         self.setWindowTitle(
             f"{sess.name} · {proj.name} — {_APP_TITLE}" if proj else f"{sess.name} — {_APP_TITLE}"
         )
+
+    def _focus_terminal(self, term: TermQtTerminal) -> None:
+        """Hand focus to a terminal, deferred to next event loop iteration.
+
+        Selecting a tree node fires while the tree still holds focus; requesting
+        focus synchronously can be overridden by Qt restoring focus to the tree.
+        A queued invocation moves the focus grab after the selection cycle.
+        """
+        from PySide6.QtCore import QTimer
+
+        term.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        QTimer.singleShot(0, lambda: term.setFocus(Qt.FocusReason.OtherFocusReason))
 
     def _show_placeholder_for_project(self, proj: Project) -> None:
         self._dyn_ph_title.setText(proj.name)
@@ -303,24 +337,30 @@ class MainWindow(QMainWindow):
                 self._teardown_terminal(sess.id)
         except Exception as e:  # surface process/launch errors to the user
             QMessageBox.warning(self, "Session error", str(e))
-        self._refresh_tree()
-        self._show_selected()
+        # Update the affected session in place. Never rebuild the tree here: a
+        # rebuild steals focus from the terminal mid-keystroke. After Start the
+        # terminal already has focus, so skip _show_selected for that action.
+        self._update_session_label(sess.id)
+        self._update_controls()
+        if action != "start":
+            self._show_selected()
 
     def _start_session(self, sess: Session) -> None:
         if self._adapter is None:
             return
         term = self._terminal_by_session.get(sess.id)
         if term is None:
-            term = TerminalWidget(parent=self._session_area)
-            term.finished.connect(lambda sid=sess.id: self._on_terminal_finished(sid))
+            term = TermQtTerminal(parent=self._session_area)
             self._terminal_by_session[sess.id] = term
             self._terminal_host.addWidget(term)
+        if self._hook is not None:
+            self._adapter.set_hook_env_for(sess.id, self._hook.env_for(sess.id))
         self._service.start_session(sess.id)
         pty = self._adapter.pty(sess.id)
         if pty is not None:
-            term.attach(pty)
+            term.attach(pty, on_finished=lambda sid=sess.id: self._on_terminal_finished(sid))  # type: ignore[misc]
         self._terminal_host.setCurrentWidget(term)
-        term.setFocus()
+        self._focus_terminal(term)
 
     def _on_terminal_finished(self, session_id: str) -> None:
         try:
@@ -369,9 +409,46 @@ class MainWindow(QMainWindow):
             self._install_process_adapter()
             self._show_selected()
 
+    def _on_hook_event(self, event: dict[str, object]) -> None:
+        """Main-thread handler for hook events.
+
+        Updates only the affected session's tree label in place — never rebuilds
+        the tree or steals focus (rebuilding mid-keystroke broke terminal input).
+        """
+        sid = event.get("sessionId")
+        if isinstance(sid, str):
+            self._update_session_label(sid)
+
+    def _update_session_label(self, session_id: str) -> None:
+        """Refresh a single session's tree label + controls without rebuilding."""
+        try:
+            sess = self._service.get_session(session_id)
+        except KeyError:
+            return
+        # find the tree item and update its text in place
+        for i in range(self._tree.topLevelItemCount()):
+            parent = self._tree.topLevelItem(i)
+            if parent is None:
+                continue
+            for j in range(parent.childCount()):
+                child = parent.child(j)
+                if child is not None and child.data(0, _SESSION_ROLE) == session_id:
+                    child.setText(0, self._session_label(sess))
+                    break
+        # update toolbar context + control enabled state for the active session
+        if session_id == self._selected_session_id():
+            self._update_controls()
+
+    def _session_label(self, sess: Session) -> str:
+        chip = _STATE_CHIP.get(sess.state, "?")
+        activity = " ⋯" if sess.agent_activity == "working" else ""
+        return f"{chip}  {sess.name}{activity}"
+
     def closeEvent(self, event: object) -> None:
         if self._adapter is not None:
             self._adapter.stop_all()
+        if self._hook is not None:
+            self._hook.stop()
         for term in list(self._terminal_by_session.values()):
             term.detach()
         super().closeEvent(event)  # type: ignore[arg-type]

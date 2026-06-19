@@ -30,6 +30,14 @@ packages = ["twat"]
 module = ["twat.ui.*", "twat.__main__"]
 strict = false
 
+[[tool.mypy.overrides]]
+module = ["termqt", "termqt.*", "ptyprocess", "ptyprocess.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["twat.ui.termqt_terminal"]
+disable_error_code = ["misc", "unused-ignore", "attr-defined", "index", "override", "arg-type", "assignment", "operator"]
+
 [tool.pytest.ini_options]
 testpaths = ["packages/twat/tests"]
 addopts = "-ra"

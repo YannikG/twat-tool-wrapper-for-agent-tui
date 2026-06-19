@@ -16,7 +16,7 @@ later slice and reuses the same widget.
 ## Idea
 
 A PTY (`ptyprocess`) runs the user's login shell in the selected project
-folder. Its byte stream feeds a `pyte` terminal emulator (VT100/VT220/xterm),
+folder. Its byte stream feeds the `termqt` terminal emulator widget (VT100/XTerm),
 maintaining a screen buffer with attributes. A custom Qt widget renders the
 buffer (cells with fg/bg colors, attributes, cursor) and encodes key events back
 to bytes written to the PTY. Resize recomputes columns/rows and resizes both the
@@ -28,7 +28,7 @@ flowchart LR
     WIDG -- write bytes --> PTY["PtySession (ptyprocess)"]
     PTY -- shell in project folder --> SH["login shell"]
     SH -- bytes --> PTY
-    PTY -- read thread --> EMU["TerminalEmulator (pyte)"]
+    PTY -- read thread --> EMU["termqt Terminal (VT100/XTerm)"]
     EMU -- buffer + cursor --> WIDG
     WIDG -- resize --> EMU
     WIDG -- resize --> PTY
@@ -39,7 +39,7 @@ flowchart LR
 - The terminal MUST run in-window (no external terminal).
 - The terminal MUST run the user's login shell (`$SHELL`, fallback `/bin/bash`)
   in the selected project folder as cwd.
-- Output MUST be rendered from a real terminal emulator (`pyte`), not a plain
+- Output MUST be rendered from a real terminal emulator (`termqt`), not a plain
   text box, so TUI apps (alt-screen, cursor, colors) render.
 - Key input MUST be sent to the PTY as bytes (printable, Enter, Backspace, Tab,
   Escape, arrows, Ctrl combos, Home/End/Delete/PageUp/Down).
@@ -53,6 +53,7 @@ flowchart LR
 - Do not launch `pi` in this slice (later slice).
 - Do not use a webview.
 - Do not use `qtermwidget`/C++ bindings (cross-platform packaging cost).
+- Do not hand-roll a VT emulator; use termqt (see ADR-0003).
 - Do not keep terminal state across project switches in this slice (later slice
   introduces sessions); switching projects stops the current terminal.
 - Do not show unstyled output; colors and attributes come from the emulator.
@@ -67,10 +68,8 @@ flowchart LR
 
 ## Verification
 
-- `pytest`: `TerminalEmulator` feed/resize; `PtySession` spawn/read/write/
-  terminate with `/bin/sh -c`.
-- `pytest-qt`: `TerminalWidget` constructs, feeds bytes without raising, a key
-  press produces bytes.
+- `pytest`: `PtySession` spawn/read/write/terminate with `/bin/sh -c`.
+- `pytest-qt`: `TermQtTerminal` constructs and attaches without raising.
 - Manual: open a terminal in a project, run `ls`, `echo $SHELL`, a color test,
   resize, switch projects, close.
 
