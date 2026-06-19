@@ -46,7 +46,8 @@ class WindowActions:
                 self._service.terminate_session(sess.id)
                 self._teardown_terminal(sess.id)
         except Exception as e:  # surface process/launch errors to the user
-            QMessageBox.warning(self, "Session error", str(e))
+            _log.exception("session action %r failed for %s", action, sess.id)
+            QMessageBox.warning(self, "Session error", f"{type(e).__name__}: {e}")
         # Update in place. Never rebuild the tree here: a rebuild steals focus
         # from the terminal mid-keystroke. After Start the terminal has focus,
         # so skip _show_selected for that action.

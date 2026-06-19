@@ -1,5 +1,7 @@
 """Tests for the twat-hook.ts generator."""
 
+import shutil
+import subprocess
 from pathlib import Path
 
 from twat.hook.generator import (
@@ -58,6 +60,15 @@ def test_render_hook_registers_status_command() -> None:
     assert "twat-status" in src
     assert "/status" in src
     assert "ctx.ui.notify" in src
+    assert 'lines.join("\\n")' in src
+
+
+def test_render_hook_is_valid_typescript(tmp_path: Path) -> None:
+    if shutil.which("node") is None:
+        return
+    path = tmp_path / "twat-hook.ts"
+    path.write_text(render_hook(version="0.2.1"), encoding="utf-8")
+    subprocess.run(["node", "--check", str(path)], check=True)
 
 
 def test_hook_path_is_in_project_extensions(tmp_path: Path) -> None:

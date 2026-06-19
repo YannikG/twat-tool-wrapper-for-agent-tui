@@ -100,7 +100,7 @@ export default function (pi: ExtensionAPI) {{
           `  bound file: ${{s.bound_file ?? "(unbound)"}}`,
           `  hook: connected (port ${{PORT}})`,
         ];
-        ctx.ui.notify(lines.join("\n"), "info");
+        ctx.ui.notify(lines.join("\\n"), "info");
       }} catch {{
         ctx.ui.notify("TWAT: could not reach the TWAT listener.", "warn");
       }}
