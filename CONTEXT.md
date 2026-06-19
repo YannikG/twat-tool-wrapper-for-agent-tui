@@ -19,7 +19,7 @@ pi's own persisted conversation (the `.jsonl` file pi owns and manages). A TWAT 
 _Avoid_: conversation file, session log (when the TWAT Session is meant)
 
 **Binding**:
-The association between a TWAT session and a pi Session file. Created at Start by whether the session was unbound (fresh `pi`) or bound (`pi --resume`); the authoritative file path always comes back from pi via the lifecycle hook, because pi is the file's owner. A running TWAT session may be temporarily unbound (no file path yet, or pi refused/got `--no-session`); that is a real state, not an error.
+The association between a TWAT session and a pi Session file. Created at Start by whether the session was unbound (fresh `pi`) or bound (`pi --session <file>`); the authoritative file path always comes back from pi via the lifecycle hook, because pi is the file's owner. A running TWAT session may be temporarily unbound (no file path yet, or pi refused/got `--no-session`); that is a real state, not an error.
 _Avoid_: link, reference, pointer
 
 **New session (action)**:
@@ -27,7 +27,7 @@ Create a TWAT session record in the project: state `exited`, unbound, default na
 _Avoid_: create session, start session
 
 **Start (action)**:
-Launch `pi`: `pi` if the session is unbound (fresh), `pi --resume <bound pi Session file>` if bound. Sets state to `running`; the binding is recorded from pi's `session_start` event.
+Launch `pi`: `pi` if the session is unbound (fresh), `pi --session <bound pi Session file>` if bound. Sets state to `running`; the binding is recorded from pi's `session_start` event.
 _Avoid_: run, launch
 
 **Stop (action)**:

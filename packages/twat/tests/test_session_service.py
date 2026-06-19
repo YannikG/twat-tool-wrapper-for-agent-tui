@@ -118,3 +118,70 @@ def test_start_unknown_session_raises(service: AppService) -> None:
     service.process_adapter = FakeProcessAdapter()
     with pytest.raises(KeyError):
         service.start_session("nope")
+
+
+# -- archive / restore ------------------------------------------------------
+
+
+def test_archive_stopped_session_sets_flag_without_stopping(service: AppService) -> None:
+    proj = service.add_project("/p/proj")
+    fake = FakeProcessAdapter()
+    service.process_adapter = fake
+    s = service.new_session(proj.id)  # exited, unbound
+
+    service.archive_session(s.id)
+
+    assert service.get_session(s.id).archived is True
+    assert service.get_session(s.id).state is SessionState.EXITED
+    assert fake.stopped == []  # already stopped; no Stop call
+
+
+def test_archive_running_session_stops_first(service: AppService) -> None:
+    proj = service.add_project("/p/proj")
+    fake = FakeProcessAdapter()
+    service.process_adapter = fake
+    s = service.new_session(proj.id)
+    service.start_session(s.id)
+
+    service.archive_session(s.id)
+
+    assert fake.stopped == [s.id]
+    assert service.get_session(s.id).archived is True
+    assert service.get_session(s.id).state is SessionState.EXITED
+
+
+def test_restore_unsets_flag_without_launching(service: AppService) -> None:
+    proj = service.add_project("/p/proj")
+    fake = FakeProcessAdapter()
+    service.process_adapter = fake
+    s = service.new_session(proj.id)
+    service.archive_session(s.id)
+
+    service.restore_session(s.id)
+
+    assert service.get_session(s.id).archived is False
+    assert service.get_session(s.id).state is SessionState.EXITED
+    assert fake.started == []  # Restore never launches pi
+
+
+def test_archive_flag_persists_across_restart(service: AppService, tmp_path: Path) -> None:
+    proj = service.add_project("/p/proj")
+    service.process_adapter = FakeProcessAdapter()
+    s = service.new_session(proj.id)
+    service.archive_session(s.id)
+
+    reloaded = AppService(StateStore(tmp_path / "state.json"))
+
+    assert reloaded.get_session(s.id).archived is True
+
+
+def test_archive_does_not_touch_bound_file(service: AppService) -> None:
+    proj = service.add_project("/p/proj")
+    service.process_adapter = FakeProcessAdapter()
+    s = service.new_session(proj.id)
+    service._set_session_bound_file(s.id, "/sessions/abc.jsonl")
+
+    service.archive_session(s.id)
+    service.restore_session(s.id)
+
+    assert service.get_session(s.id).bound_file == "/sessions/abc.jsonl"

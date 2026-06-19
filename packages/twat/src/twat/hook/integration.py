@@ -7,11 +7,14 @@ session id. The UI marshals updates to the Qt main thread (slice wiring below).
 
 from __future__ import annotations
 
+import logging
 import secrets
 
 from twat.app.service import AppService
 from twat.hook.listener import HookListener
 from twat.hook.router import route_event
+
+_log = logging.getLogger("twat.hook")
 
 
 class HookIntegration:
@@ -33,8 +36,10 @@ class HookIntegration:
 
     def start(self) -> None:
         self._listener.start()
+        _log.info("hook listener started on port %s", self.port)
 
     def stop(self) -> None:
+        _log.info("hook listener stopping")
         self._listener.stop()
 
     def env_for(self, session_id: str) -> dict[str, str]:
@@ -46,7 +51,11 @@ class HookIntegration:
         }
 
     def _handle(self, event: dict[str, object]) -> None:
-        route_event(self._service, event)
+        _log.info("hook event received: %s", {k: event.get(k) for k in ("type", "sessionId")})
+        try:
+            route_event(self._service, event)
+        except Exception:
+            _log.exception("hook event routing failed")
         if self._on_event is not None:
             # mypy: on_event is loosely typed to avoid importing Qt here
             self._on_event(event)  # type: ignore[operator]

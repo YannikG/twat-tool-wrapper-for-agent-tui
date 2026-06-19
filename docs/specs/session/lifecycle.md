@@ -18,7 +18,7 @@ instance lock, and app-quit dialog land in 3b+.
 A Session is a TWAT-owned runtime handle wrapping a `pi` process (see
 [`../../../CONTEXT.md`](../../../CONTEXT.md): Session, Binding). The user creates a
 Session (state `exited`, unbound), then Starts it: `pi` if unbound, `pi
---resume <bound file>` if bound. Binding is recorded from pi (slice 4 hook); in
+--session <bound file>` if bound. Binding is recorded from pi (slice 4 hook); in
 this slice a session stays unbound and Start always launches a fresh `pi` in the
 project folder. Stop = graceful (SIGTERM), Terminate = hard (SIGKILL). Multiple
 sessions can be open; switching between them shows each terminal. In this slice
@@ -31,7 +31,7 @@ stateDiagram-v2
     exited --> running: Start
     running --> exited: Stop (graceful)
     running --> failed: Terminate (hard)
-    exited --> running: Start (pi --resume if bound)
+    exited --> running: Start (pi --session if bound)
     failed --> running: Start
 ```
 

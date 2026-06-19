@@ -26,6 +26,8 @@ Four termqt gaps are patched here:
 
 from __future__ import annotations
 
+import logging
+import re
 import threading
 import unicodedata
 from collections.abc import Callable
@@ -37,11 +39,34 @@ from termqt.colors import colors8, colors16, colors256
 
 from twat.terminal.pty_session import PtySession
 
+_log = logging.getLogger("twat.terminal")
+
 _DECCKM_ON = b"\x1b[?1h"
 _DECCKM_OFF = b"\x1b[?1l"
 # DEC 2026 (Synchronized Output): BSU/ESU mark an atomic redraw frame.
 _SYNC_ON = b"\x1b[?2026h"
 _SYNC_OFF = b"\x1b[?2026l"
+
+# Escape sequences termqt's escape processor can't handle (it raises). pi emits
+# all of these; none affect text rendering, so strip them before feeding termqt:
+#   * OSC strings (\x1b]...BEL/ST): titles (OSC 0/2), hyperlinks (OSC 8),
+#     color queries — termqt never responds to queries and renders text fine
+#     without them.
+#   * Kitty keyboard protocol CSI: \x1b[<...u / \x1b[>...u / \x1b[?...u
+#     (capability negotiation; no response = pi falls back to plain keys).
+#   * Device Attributes queries: \x1b[c / \x1b[>c (DA1/DA2; termqt ignores).
+_UNSUPPORTED_SEQ_RE = re.compile(
+    rb"\x1b\].*?(?:\x07|\x1b\\)"  # OSC: ESC ] ... BEL | ST
+    rb"|\x1b\[[<>?][0-9]*u"  # Kitty keyboard
+    rb"|\x1b\[[0-9>]*c",  # DA1/DA2 query
+    re.DOTALL,
+)
+
+
+def _strip_unsupported(data: bytes) -> bytes:
+    """Remove escape sequences termqt can't parse, before they reach it."""
+    return _UNSUPPORTED_SEQ_RE.sub(b"", data)
+
 
 _APP_ARROWS = {
     Qt.Key.Key_Up: b"\x1bOA",
@@ -338,6 +363,11 @@ class TermQtTerminal(Terminal):
             buf = buf[:split]
         if not buf:
             return
+        # Strip escape sequences termqt can't parse (OSC titles/hyperlinks,
+        # Kitty keyboard, DA queries) before they reach its escape processor.
+        buf = _strip_unsupported(buf)
+        if not buf:
+            return
         if _DECCKM_ON in buf:
             self._app_cursor = True
         elif _DECCKM_OFF in buf:
@@ -412,10 +442,17 @@ class TermQtTerminal(Terminal):
             c = ord(ch)
             try:
                 ret = ep.input(c)
-            except ValueError:
-                # termqt raises on sequences it doesn't implement (Kitty
-                # keyboard `[>...u`, OSC 8 hyperlinks `]8;;`); skip them like
-                # termqt's own _stdout_string does instead of crashing.
+            except (ValueError, IndexError) as exc:
+                # termqt raises ValueError on sequences it doesn't implement
+                # (Kitty keyboard `[>...u`, OSC 8 hyperlinks `]8;;`) and IndexError when an
+                # erase/cursor op runs against a row index outside the deque
+                # (e.g. `ESC[J` while the cursor is past the buffer during a
+                # scroll/resize race). Most unsupported sequences are stripped
+                # upstream (_strip_unsupported); anything residual here (a
+                # sequence split across PTY reads) is expected — reset and keep
+                # rendering. DEBUG, not WARNING: these are not actionable.
+                ep.reset()
+                _log.debug("escape processor dropped a byte (0x%02x): %s", c, exc)
                 continue
             if ret == 0:
                 if pending:

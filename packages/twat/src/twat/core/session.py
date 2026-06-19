@@ -32,6 +32,7 @@ class Session:
     state: SessionState
     bound_file: str | None = None  # pi Session file; None until the hook reports it
     agent_activity: str = "idle"  # "idle" | "working"; ephemeral, from hook events
+    archived: bool = False  # orthogonal to state; hides from active sidebar
 
     def with_state(self, state: SessionState) -> Session:
         return Session(
@@ -71,6 +72,18 @@ class Session:
             state=self.state,
             bound_file=self.bound_file,
             agent_activity=activity,
+            archived=self.archived,
+        )
+
+    def with_archived(self, archived: bool) -> Session:
+        return Session(
+            id=self.id,
+            project_id=self.project_id,
+            name=self.name,
+            state=self.state,
+            bound_file=self.bound_file,
+            agent_activity=self.agent_activity,
+            archived=archived,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -81,6 +94,7 @@ class Session:
             "state": self.state.value,
             "bound_file": self.bound_file,
             "agent_activity": self.agent_activity,
+            "archived": self.archived,
         }
 
     @classmethod
@@ -92,6 +106,7 @@ class Session:
             state=SessionState(str(data["state"])),
             bound_file=data.get("bound_file"),
             agent_activity=str(data.get("agent_activity", "idle")),
+            archived=bool(data.get("archived", False)),
         )
 
 

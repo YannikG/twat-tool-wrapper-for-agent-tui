@@ -70,3 +70,50 @@ def test_project_title_when_no_session_selected(qtbot, tmp_path: Path) -> None:
     win.select_project(proj.id)
 
     assert "Solo" in win.windowTitle()
+
+
+# -- archive / restore -------------------------------------------------------
+
+
+def test_archived_session_moves_to_archive_node(qtbot, tmp_path: Path) -> None:
+    svc = _service(tmp_path)
+    win = MainWindow(svc)
+    qtbot.addWidget(win)
+    proj = svc.add_project(tmp_path / "proj", name="Proj")
+    sess = svc.new_session(proj.id, name="Done")
+    win._refresh_tree()
+
+    svc.archive_session(sess.id)
+    win._refresh_tree()
+
+    # gone from the project's active list...
+    assert not any("Done" in lbl for lbl in win.session_labels_for(proj.id))
+    # ...but present under the Archive node
+    assert any("Done" in lbl for lbl in win.archive_labels())
+
+
+def test_restore_moves_session_back_to_project(qtbot, tmp_path: Path) -> None:
+    svc = _service(tmp_path)
+    win = MainWindow(svc)
+    qtbot.addWidget(win)
+    proj = svc.add_project(tmp_path / "proj", name="Proj")
+    sess = svc.new_session(proj.id, name="Revive")
+    svc.archive_session(sess.id)
+    win._refresh_tree()
+
+    svc.restore_session(sess.id)
+    win._refresh_tree()
+
+    assert any("Revive" in lbl for lbl in win.session_labels_for(proj.id))
+    assert not any("Revive" in lbl for lbl in win.archive_labels())
+
+
+def test_archive_node_hidden_when_empty(qtbot, tmp_path: Path) -> None:
+    svc = _service(tmp_path)
+    win = MainWindow(svc)
+    qtbot.addWidget(win)
+    svc.add_project(tmp_path / "proj", name="Proj")
+    win._refresh_tree()
+
+    assert win.archive_labels() == []
+    assert "Archive" not in win.project_names()

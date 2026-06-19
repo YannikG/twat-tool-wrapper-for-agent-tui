@@ -7,6 +7,7 @@ widget that reads from these PTYs; this adapter only owns process lifecycle.
 
 from __future__ import annotations
 
+import logging
 import os
 import shlex
 import sys
@@ -15,6 +16,8 @@ from collections.abc import Mapping
 from twat.app.process_adapter import ProcessAdapter  # noqa: F401  (re-exported)
 from twat.hook.generator import needs_update, write_hook
 from twat.terminal.pty_session import PtySession
+
+_log = logging.getLogger("twat.adapter")
 
 
 def _launcher_command(pi_path: str, resume_file: str | None) -> list[str]:
@@ -25,13 +28,15 @@ def _launcher_command(pi_path: str, resume_file: str | None) -> list[str]:
     """
     if sys.platform == "win32":
         if resume_file:
-            return ["cmd.exe", "/c", f'"{pi_path}" --resume "{resume_file}"']
+            return ["cmd.exe", "/c", f'"{pi_path}" --session "{resume_file}"']
         return ["cmd.exe", "/c", f'"{pi_path}"']
     shell = os.environ.get("SHELL") or "/bin/bash"
+    # Bound session: resume that EXACT pi Session file. `pi --resume` ignores a
+    # file arg and shows a picker; `pi --session <path>` loads the file directly.
     pi_arg = (
-        shlex.quote(pi_path)
-        if not resume_file
-        else (f"{shlex.quote(pi_path)} --resume {shlex.quote(resume_file)}")
+        f"{shlex.quote(pi_path)} --session {shlex.quote(resume_file)}"
+        if resume_file
+        else shlex.quote(pi_path)
     )
     # Run pi directly; the PTY closes when pi exits, so TWAT detects exit cleanly.
     # (Earlier design dropped to an interactive shell after pi exit, but that left
@@ -60,10 +65,14 @@ class PiProcessAdapter:
         self.stop(session_id)
         # generate / refresh the twat-hook extension in the project (idempotent)
         if needs_update(cwd, self._version):
+            _log.info("writing twat-hook extension in %s", cwd)
             write_hook(cwd, self._version)
         argv = _launcher_command(self._pi_path, resume_file)
         env = dict(os.environ)
         env.update(self._hook_env_by_session.get(session_id, {}))
+        _log.info(
+            "spawning pi session=%s cwd=%s resume=%s argv=%s", session_id, cwd, resume_file, argv
+        )
         self._sessions[session_id] = PtySession.spawn(argv, cwd=cwd, env=env)
         # consume the one-shot env
         self._hook_env_by_session.pop(session_id, None)
@@ -71,12 +80,14 @@ class PiProcessAdapter:
     def stop(self, session_id: str) -> None:
         session = self._sessions.get(session_id)
         if session is not None:
+            _log.info("closing PTY session=%s (graceful)", session_id)
             session.close(force=False)
             del self._sessions[session_id]
 
     def terminate(self, session_id: str) -> None:
         session = self._sessions.get(session_id)
         if session is not None:
+            _log.warning("closing PTY session=%s (force)", session_id)
             session.close(force=True)
             del self._sessions[session_id]
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -26,16 +27,49 @@ def config_dir() -> Path:
     return base
 
 
+def _configure_logging(log_file: Path) -> None:
+    """Heavy logging: DEBUG to a file, INFO to stderr.
+
+    Set TWAT_LOG_LEVEL=DEBUG to push stderr to debug too. Logs carry enough
+    context (session ids, hook events, terminal lifecycle) that a failure
+    report includes what happened before the error.
+    """
+    level = logging.getLevelName(os.environ.get("TWAT_LOG_LEVEL", "INFO").upper())
+    root = logging.getLogger("twat")
+    root.setLevel(logging.DEBUG)
+    root.handlers.clear()
+
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+    fh = logging.FileHandler(log_file, encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(fmt)
+    root.addHandler(fh)
+
+    sh = logging.StreamHandler(sys.stderr)
+    sh.setLevel(level)
+    sh.setFormatter(fmt)
+    root.addHandler(sh)
+
+    root.info("logging initialized; file=%s stderr-level=%s", log_file, logging.getLevelName(level))
+
+
 def run() -> None:
+    cfg = config_dir()
+    _configure_logging(cfg / "twat.log")
+    log = logging.getLogger("twat.main")
+    log.info("TWAT starting; config dir=%s", cfg)
+
     app = QApplication(sys.argv)
     app.setApplicationName("TWAT")
     app.setStyle("Fusion")
 
-    service = AppService(StateStore(config_dir() / "state.json"))
+    service = AppService(StateStore(cfg / "state.json"))
     apply_theme(app, service.settings.theme.value)
 
     window = MainWindow(service)
     window.show()
+    log.info("TWAT window shown")
     sys.exit(app.exec())
 
 

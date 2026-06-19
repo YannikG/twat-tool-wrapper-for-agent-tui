@@ -8,6 +8,8 @@ Terminate + New Session live in a toolbar above the terminal.
 
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -38,6 +40,8 @@ from twat.ui.theme import apply_theme
 _PROJECT_ROLE = Qt.ItemDataRole.UserRole + 1
 _SESSION_ROLE = Qt.ItemDataRole.UserRole + 2
 _APP_TITLE = "TWAT — Tool Wrapper for Agent TUIs"
+
+_log = logging.getLogger("twat.ui")
 
 _STATE_CHIP = {
     SessionState.STARTING: "…",
@@ -160,9 +164,13 @@ class MainWindow(QMainWindow):
         self._start_btn = QPushButton("▶ Start")
         self._stop_btn = QPushButton("⏹ Stop")
         self._term_btn = QPushButton("✕ Terminate")
+        self._archive_btn = QPushButton("Archive")
+        self._restore_btn = QPushButton("Restore")
         self._start_btn.clicked.connect(lambda: self._session_action("start"))
         self._stop_btn.clicked.connect(lambda: self._session_action("stop"))
         self._term_btn.clicked.connect(lambda: self._session_action("terminate"))
+        self._archive_btn.clicked.connect(self._on_archive)
+        self._restore_btn.clicked.connect(self._on_restore)
         self._ctx_label = QLabel("")
         self._ctx_label.setObjectName("ToolbarContext")
         tb_layout.addWidget(self._new_session_btn)
@@ -172,6 +180,8 @@ class MainWindow(QMainWindow):
         tb_layout.addWidget(self._start_btn)
         tb_layout.addWidget(self._stop_btn)
         tb_layout.addWidget(self._term_btn)
+        tb_layout.addWidget(self._archive_btn)
+        tb_layout.addWidget(self._restore_btn)
         sa_layout.addWidget(self._toolbar)
 
         self._terminal_host = QStackedWidget()
@@ -207,10 +217,30 @@ class MainWindow(QMainWindow):
             proj_item.setData(0, _PROJECT_ROLE, proj.id)
             proj_item.setExpanded(True)
             for sess in self._service.sessions_for(proj.id):
+                if sess.archived:
+                    continue  # archived sessions live under the Archive node
                 sess_item = QTreeWidgetItem([self._session_label(sess)])
                 sess_item.setData(0, _SESSION_ROLE, sess.id)
                 proj_item.addChild(sess_item)
             self._tree.addTopLevelItem(proj_item)
+        # Archive node: groups archived sessions across all projects. Only shown
+        # when there is at least one archived session.
+        archived = [s for s in self._service.sessions_for_all() if s.archived]
+        if archived:
+            arch_item = QTreeWidgetItem(["Archive"])
+            arch_item.setExpanded(True)
+            for sess in archived:
+                sess_item = QTreeWidgetItem([self._archive_session_label(sess)])
+                sess_item.setData(0, _SESSION_ROLE, sess.id)
+                arch_item.addChild(sess_item)
+            self._tree.addTopLevelItem(arch_item)
+        _log.debug(
+            "refresh_tree: projects=%d active=%d archived=%d selected=%s",
+            len(self._service.projects),
+            sum(1 for s in self._service.sessions_for_all() if not s.archived),
+            len(archived),
+            selected_sid,
+        )
         if selected_sid is not None:
             self._select_session(selected_sid)
         self._update_controls()
@@ -299,12 +329,15 @@ class MainWindow(QMainWindow):
 
     def _show_session_placeholder(self, sess: Session, proj: Project | None) -> None:
         base = f"{proj.name} · {proj.path}" if proj else ""
-        hint = {
-            SessionState.RUNNING: f"{base}  (reconnecting…)",
-            SessionState.EXITED: f"{base}  — press Start to launch pi",
-            SessionState.FAILED: f"{base}  — terminated",
-            SessionState.STARTING: f"{base}  — starting…",
-        }.get(sess.state, base)
+        if sess.archived:
+            hint = f"{base}  — archived; Restore to re-activate, then Start to resume"
+        else:
+            hint = {
+                SessionState.RUNNING: f"{base}  (reconnecting…)",
+                SessionState.EXITED: f"{base}  — press Start to launch pi",
+                SessionState.FAILED: f"{base}  — terminated",
+                SessionState.STARTING: f"{base}  — starting…",
+            }.get(sess.state, base)
         self._dyn_ph_title.setText(sess.name)
         self._dyn_ph_sub.setText(hint)
         self._terminal_host.setCurrentWidget(self._dyn_placeholder)
@@ -314,6 +347,20 @@ class MainWindow(QMainWindow):
         sess = self._selected_session()
         self._new_session_btn.setEnabled(proj is not None)
         if sess is None or self._adapter is None:
+            for b in (
+                self._start_btn,
+                self._stop_btn,
+                self._term_btn,
+                self._archive_btn,
+                self._restore_btn,
+            ):
+                b.setEnabled(False)
+            return
+        archived = sess.archived
+        self._archive_btn.setEnabled(not archived)
+        self._restore_btn.setEnabled(archived)
+        if archived:
+            # archived sessions are stopped; Restore first, then Start to resume
             for b in (self._start_btn, self._stop_btn, self._term_btn):
                 b.setEnabled(False)
             return
@@ -363,9 +410,11 @@ class MainWindow(QMainWindow):
         self._focus_terminal(term)
 
     def _on_terminal_finished(self, session_id: str) -> None:
+        _log.info("terminal finished session=%s", session_id)
         try:
             self._service.stop_session(session_id)
         except KeyError:
+            _log.warning("terminal finished for unknown session %s", session_id)
             return
         self._teardown_terminal(session_id)
         self._refresh_tree()
@@ -381,8 +430,31 @@ class MainWindow(QMainWindow):
     def _on_new_session(self) -> None:
         proj = self._selected_project()
         if proj is None:
+            _log.warning("new_session clicked but no project selected")
             return
         sess = self._service.new_session(proj.id)
+        _log.info("new session created id=%s; refreshing tree", sess.id)
+        self._refresh_tree()
+        self._select_session(sess.id)
+
+    def _on_archive(self) -> None:
+        sess = self._selected_session()
+        if sess is None:
+            return
+        try:
+            self._service.archive_session(sess.id)
+        except Exception as e:  # surface process/launch errors to the user
+            QMessageBox.warning(self, "Session error", str(e))
+            return
+        self._teardown_terminal(sess.id)
+        self._refresh_tree()
+        self._show_selected()
+
+    def _on_restore(self) -> None:
+        sess = self._selected_session()
+        if sess is None:
+            return
+        self._service.restore_session(sess.id)
         self._refresh_tree()
         self._select_session(sess.id)
 
@@ -416,6 +488,7 @@ class MainWindow(QMainWindow):
         the tree or steals focus (rebuilding mid-keystroke broke terminal input).
         """
         sid = event.get("sessionId")
+        _log.debug("hook event type=%s session=%s", event.get("type"), sid)
         if isinstance(sid, str):
             self._update_session_label(sid)
 
@@ -444,6 +517,12 @@ class MainWindow(QMainWindow):
         activity = " ⋯" if sess.agent_activity == "working" else ""
         return f"{chip}  {sess.name}{activity}"
 
+    def _archive_session_label(self, sess: Session) -> str:
+        # show project context so archived sessions stay identifiable across projects
+        proj = next((p for p in self._service.projects if p.id == sess.project_id), None)
+        ctx = f" ({proj.name})" if proj is not None else ""
+        return f"{sess.name}{ctx}"
+
     def closeEvent(self, event: object) -> None:
         if self._adapter is not None:
             self._adapter.stop_all()
@@ -468,6 +547,20 @@ class MainWindow(QMainWindow):
         for i in range(self._tree.topLevelItemCount()):
             item = self._tree.topLevelItem(i)
             if item is None or item.data(0, _PROJECT_ROLE) != project_id:
+                continue
+            for j in range(item.childCount()):
+                child = item.child(j)
+                if child is not None:
+                    names.append(child.text(0))
+        return names
+
+    def archive_labels(self) -> list[str]:
+        names: list[str] = []
+        for i in range(self._tree.topLevelItemCount()):
+            item = self._tree.topLevelItem(i)
+            if item is None or item.data(0, _PROJECT_ROLE) is not None:
+                continue  # skip project nodes; Archive node has no project role
+            if item.text(0) != "Archive":
                 continue
             for j in range(item.childCount()):
                 child = item.child(j)

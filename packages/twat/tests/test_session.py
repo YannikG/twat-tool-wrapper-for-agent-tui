@@ -74,6 +74,32 @@ def test_session_with_name_updates_name() -> None:
     assert s2.name == "Refactor auth"
 
 
+def test_session_archived_defaults_false(tmp_path: Path) -> None:
+    proj = create_project(tmp_path / "p")
+    s = create_session(project_id=proj.id)
+
+    assert s.archived is False
+
+
+def test_session_with_archived_sets_flag(tmp_path: Path) -> None:
+    proj = create_project(tmp_path / "p")
+    s = create_session(project_id=proj.id)
+
+    s2 = s.with_archived(True)
+
+    assert s2.archived is True
+    assert s.archived is False  # original unchanged
+
+
+def test_session_archived_round_trips(tmp_path: Path) -> None:
+    proj = create_project(tmp_path / "p")
+    s = create_session(project_id=proj.id).with_archived(True)
+
+    rebuilt = Session.from_dict(s.to_dict())
+
+    assert rebuilt.archived is True
+
+
 def test_session_relative_path_irrelevant(tmp_path: Path) -> None:
     # project path is resolved at project creation; session just references the id
     proj = create_project(tmp_path / "p")

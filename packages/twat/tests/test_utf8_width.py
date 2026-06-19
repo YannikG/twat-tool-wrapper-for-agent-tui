@@ -101,6 +101,49 @@ def test_unsupported_escape_does_not_crash(qtbot) -> None:
     assert "".join((c.char if c is not None else " ") for c in t._buffer[0][:5]) == "AFTER"
 
 
+def test_unsupported_sequences_are_stripped_silently() -> None:
+    # pi emits OSC titles/hyperlinks, Kitty keyboard, and DA queries termqt
+    # can't parse. They must be removed before termqt sees them (no raise, no
+    # log spam) and surrounding text must survive intact.
+    from twat.ui.termqt_terminal import _strip_unsupported
+
+    stripped = _strip_unsupported(
+        b"A\x1b]8;;https://x\x07B\x1b[>7uC\x1b[<uD\x1b]0;pi\x07E\x1b[cF\x1b[?uG"
+    )
+    assert stripped == b"ABCDEFG"
+
+    # OSC terminated by ST (ESC \) too
+    assert _strip_unsupported(b"X\x1b]2;t\x1b\\Y") == b"XY"
+
+
+def test_indexerror_in_escape_processor_does_not_crash(qtbot) -> None:
+    # termqt's erase_display raises IndexError when a cursor/erase op runs
+    # against a row deque that is out of range (scroll/resize race). The stream
+    # must keep rendering, not crash the whole PTY reader.
+    t = TermQtTerminal()
+    qtbot.addWidget(t)
+    t.create_buffer(80, 24)
+
+    raised: list[int] = []
+    orig = t.escape_processor.input
+
+    def fake_input(c: int) -> int:
+        # raise on the 'J' byte of an `ESC [ J` erase-display, like termqt does
+        if c == ord("J"):
+            raised.append(c)
+            raise IndexError("deque index out of range")
+        return orig(c)
+
+    t.escape_processor.input = fake_input  # type: ignore[method-assign]
+    t._on_data(b"\x1b[2JAFTER")
+    QApplication.processEvents()
+
+    assert raised  # the erase byte was hit
+    assert (
+        "".join((c.char if c is not None else " ") for c in t._buffer[0][:5]) == "AFTER"
+    )  # rendering continued past the dropped sequence
+
+
 def test_char_width_matches_wcwidth_not_font(qtbot) -> None:
     # pi lays out with wcwidth; braille and box-drawing are 1 cell, CJK is 2.
     # The font's glyph advance must not decide cell width (that caused drift).

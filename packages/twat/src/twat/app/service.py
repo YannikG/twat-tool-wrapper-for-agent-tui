@@ -6,6 +6,7 @@ second consumer needs live updates in slice 1).
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from twat.app.process_adapter import ProcessAdapter
@@ -16,6 +17,8 @@ from twat.core.settings import Settings, Theme
 from twat.core.store import StateStore
 
 __all__ = ["AppService", "ProjectExistsError"]
+
+_log = logging.getLogger("twat.service")
 
 
 class _NoopProcessAdapter:
@@ -82,6 +85,9 @@ class AppService:
     def sessions_for(self, project_id: str) -> list[Session]:
         return [s for s in self._state.sessions if s.project_id == project_id]
 
+    def sessions_for_all(self) -> list[Session]:
+        return list(self._state.sessions)
+
     def get_session(self, session_id: str) -> Session:
         for s in self._state.sessions:
             if s.id == session_id:
@@ -92,22 +98,27 @@ class AppService:
         session = create_session(project_id, name)
         self._state.sessions.append(session)
         self._save()
+        _log.info("new session id=%s project=%s name=%r", session.id, project_id, session.name)
         return session
 
     def start_session(self, session_id: str) -> None:
         session = self.get_session(session_id)
         project = next((p for p in self._state.projects if p.id == session.project_id), None)
         if project is None:
+            _log.error("start: project not found for session %s", session_id)
             raise KeyError(session.project_id)
+        _log.info("start session %s in %s resume=%s", session_id, project.path, session.bound_file)
         self._replace(session.with_state(SessionState.STARTING))
         self.process_adapter.start(session_id, project.path, session.bound_file)
         self._replace(session.with_state(SessionState.RUNNING))
 
     def stop_session(self, session_id: str) -> None:
+        _log.info("stop session %s", session_id)
         self.process_adapter.stop(session_id)
         self._replace(self.get_session(session_id).with_state(SessionState.EXITED))
 
     def terminate_session(self, session_id: str) -> None:
+        _log.warning("terminate session %s", session_id)
         self.process_adapter.terminate(session_id)
         self._replace(self.get_session(session_id).with_state(SessionState.FAILED))
 
@@ -133,6 +144,29 @@ class AppService:
         if sess.state is SessionState.EXITED:
             return
         self._replace(sess.with_state(SessionState.EXITED))
+
+    # -- archive / restore --------------------------------------------------
+
+    def archive_session(self, session_id: str) -> None:
+        """Hide a session from the active sidebar under the archive.
+
+        If it is running/starting, Stop it gracefully first (wait for the
+        process to end), then set the archived flag. The pi Session conversation
+        file is untouched. Never launches pi.
+        """
+        sess = self.get_session(session_id)
+        _log.info("archive session %s state=%s", session_id, sess.state)
+        if sess.state in (SessionState.RUNNING, SessionState.STARTING):
+            self.stop_session(session_id)
+        self._replace(self.get_session(session_id).with_archived(True))
+
+    def restore_session(self, session_id: str) -> None:
+        """Un-archive a stopped session so it reappears in the active sidebar.
+
+        Does NOT launch pi; the user Starts to resume the conversation.
+        """
+        _log.info("restore session %s", session_id)
+        self._replace(self.get_session(session_id).with_archived(False))
 
     def _replace(self, session: Session) -> None:
         for i, s in enumerate(self._state.sessions):
