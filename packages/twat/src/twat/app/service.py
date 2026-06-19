@@ -16,9 +16,13 @@ from twat.core.session import Session, SessionState, create_session
 from twat.core.settings import Settings, Theme
 from twat.core.store import StateStore
 
-__all__ = ["AppService", "ProjectExistsError"]
+__all__ = ["AppService", "ProjectExistsError", "SessionActiveError"]
 
 _log = logging.getLogger("twat.service")
+
+
+class SessionActiveError(RuntimeError):
+    """Raised when a destructive op targets a still-running session."""
 
 
 class _NoopProcessAdapter:
@@ -167,6 +171,47 @@ class AppService:
         """
         _log.info("restore session %s", session_id)
         self._replace(self.get_session(session_id).with_archived(False))
+
+    # -- delete -------------------------------------------------------------
+
+    def delete_session(self, session_id: str) -> None:
+        """Permanently remove a stopped session record from TWAT's state.
+
+        The pi Session conversation file (owned by pi) is NEVER touched; only
+        TWAT metadata is removed. Refuses a running/starting session — Stop or
+        Terminate first. Destructive: a deleted session cannot be Restored.
+        """
+        sess = self.get_session(session_id)
+        if sess.state in (SessionState.RUNNING, SessionState.STARTING):
+            raise SessionActiveError(
+                f"session {session_id} is {sess.state.value}; stop it before deleting"
+            )
+        _log.info("delete session %s (metadata only; conversation file kept)", session_id)
+        self._state.sessions = [s for s in self._state.sessions if s.id != session_id]
+        self._save()
+
+    def delete_project(self, project_id: str) -> None:
+        """Permanently remove a project and all its sessions from TWAT's state.
+
+        Running sessions are gracefully Stopped first. The on-disk folder and
+        pi Session conversation files are NEVER touched; only TWAT metadata is
+        removed. The folder can be re-added later.
+        """
+        if project_id not in {p.id for p in self._state.projects}:
+            raise KeyError(project_id)
+        sessions = self.sessions_for(project_id)
+        for s in sessions:
+            if s.state in (SessionState.RUNNING, SessionState.STARTING):
+                _log.info("delete_project: stopping running session %s first", s.id)
+                self.stop_session(s.id)
+        _log.info(
+            "delete project %s + %d session(s) (metadata only; files kept)",
+            project_id,
+            len(sessions),
+        )
+        self._state.sessions = [s for s in self._state.sessions if s.project_id != project_id]
+        self._state.projects = [p for p in self._state.projects if p.id != project_id]
+        self._save()
 
     def _replace(self, session: Session) -> None:
         for i, s in enumerate(self._state.sessions):

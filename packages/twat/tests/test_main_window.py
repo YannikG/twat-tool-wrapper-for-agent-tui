@@ -108,6 +108,78 @@ def test_restore_moves_session_back_to_project(qtbot, tmp_path: Path) -> None:
     assert not any("Revive" in lbl for lbl in win.archive_labels())
 
 
+def test_delete_archived_session_removes_it(qtbot, tmp_path: Path, monkeypatch) -> None:
+    # confirm dialog auto-accepted so the test does not block
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    svc = _service(tmp_path)
+    win = MainWindow(svc)
+    qtbot.addWidget(win)
+    proj = svc.add_project(tmp_path / "proj", name="Proj")
+    sess = svc.new_session(proj.id, name="Goner")
+    svc.archive_session(sess.id)
+    win._refresh_tree()
+    win.select_session(sess.id)
+
+    win._on_delete_session()
+
+    assert not any("Goner" in lbl for lbl in win.archive_labels())
+    assert not any("Goner" in lbl for lbl in win.session_labels_for(proj.id))
+
+
+def test_delete_session_cancel_keeps_it(qtbot, tmp_path: Path, monkeypatch) -> None:
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
+    svc = _service(tmp_path)
+    win = MainWindow(svc)
+    qtbot.addWidget(win)
+    proj = svc.add_project(tmp_path / "proj", name="Proj")
+    sess = svc.new_session(proj.id, name="Keep")
+    svc.archive_session(sess.id)
+    win._refresh_tree()
+    win.select_session(sess.id)
+
+    win._on_delete_session()
+
+    assert any("Keep" in lbl for lbl in win.archive_labels())
+
+
+def test_delete_project_removes_project_and_sessions(qtbot, tmp_path: Path, monkeypatch) -> None:
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    svc = _service(tmp_path)
+    win = MainWindow(svc)
+    qtbot.addWidget(win)
+    proj = svc.add_project(tmp_path / "proj", name="ByeProj")
+    svc.new_session(proj.id, name="S1")
+    win._refresh_tree()
+    win.select_project(proj.id)
+
+    win._on_delete_project()
+
+    assert "ByeProj" not in win.project_names()
+    assert win.session_labels_for(proj.id) == []
+
+
+def test_delete_project_cancel_keeps_it(qtbot, tmp_path: Path, monkeypatch) -> None:
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
+    svc = _service(tmp_path)
+    win = MainWindow(svc)
+    qtbot.addWidget(win)
+    proj = svc.add_project(tmp_path / "proj", name="StayProj")
+    win._refresh_tree()
+    win.select_project(proj.id)
+
+    win._on_delete_project()
+
+    assert "StayProj" in win.project_names()
+
+
 def test_archive_node_hidden_when_empty(qtbot, tmp_path: Path) -> None:
     svc = _service(tmp_path)
     win = MainWindow(svc)
@@ -117,3 +189,33 @@ def test_archive_node_hidden_when_empty(qtbot, tmp_path: Path) -> None:
 
     assert win.archive_labels() == []
     assert "Archive" not in win.project_names()
+
+
+def test_session_context_menu_actions_are_state_aware(qtbot, tmp_path: Path) -> None:
+    # A stopped archived session exposes Restore + Delete (no Archive).
+    svc = _service(tmp_path)
+    win = MainWindow(svc)
+    qtbot.addWidget(win)
+    proj = svc.add_project(tmp_path / "proj", name="Proj")
+    sess = svc.new_session(proj.id, name="Arch")
+    svc.archive_session(sess.id)
+    win._refresh_tree()
+    win.select_session(sess.id)
+
+    actions = win.session_context_actions()
+    assert "Restore" in actions
+    assert "Delete" in actions
+    assert "Archive" not in actions  # already archived
+    assert "Start" in actions  # stopped -> Start offered
+
+
+def test_project_context_menu_has_add_and_delete(qtbot, tmp_path: Path) -> None:
+    svc = _service(tmp_path)
+    win = MainWindow(svc)
+    qtbot.addWidget(win)
+    proj = svc.add_project(tmp_path / "proj", name="Proj")
+    win._refresh_tree()
+    win.select_project(proj.id)
+
+    actions = win.project_context_actions()
+    assert actions == ["Add Session", "Delete Project"]

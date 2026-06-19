@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, QPoint, Qt, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QSplitter,
@@ -29,7 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from twat.app.pi_process_adapter import PiProcessAdapter
-from twat.app.service import AppService, ProjectExistsError
+from twat.app.service import AppService, ProjectExistsError, SessionActiveError
 from twat.core.project import Project, suggest_name
 from twat.core.session import Session, SessionState
 from twat.hook.integration import HookIntegration
@@ -119,6 +120,11 @@ class MainWindow(QMainWindow):
         self._tree.setUniformRowHeights(True)
         self._tree.setExpandsOnDoubleClick(False)
         self._tree.itemSelectionChanged.connect(self._on_selection_changed)
+        # Right-click context menus: sessions get Archive/Start/Stop/Terminate/
+        # Restore/Delete; projects get Add Session/Delete. (Start/Stop/Terminate
+        # also stay in the toolbar; the rest moved here from the toolbar.)
+        self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._tree.customContextMenuRequested.connect(self._on_context_menu)
         layout.addWidget(self._tree, 1)
 
         add_btn = QPushButton("+ Add Project")
@@ -159,29 +165,20 @@ class MainWindow(QMainWindow):
         tb_layout = QHBoxLayout(self._toolbar)
         tb_layout.setContentsMargins(0, 0, 0, 0)
         tb_layout.setSpacing(6)
-        self._new_session_btn = QPushButton("+ New Session")
-        self._new_session_btn.clicked.connect(self._on_new_session)
         self._start_btn = QPushButton("▶ Start")
         self._stop_btn = QPushButton("⏹ Stop")
         self._term_btn = QPushButton("✕ Terminate")
-        self._archive_btn = QPushButton("Archive")
-        self._restore_btn = QPushButton("Restore")
         self._start_btn.clicked.connect(lambda: self._session_action("start"))
         self._stop_btn.clicked.connect(lambda: self._session_action("stop"))
         self._term_btn.clicked.connect(lambda: self._session_action("terminate"))
-        self._archive_btn.clicked.connect(self._on_archive)
-        self._restore_btn.clicked.connect(self._on_restore)
         self._ctx_label = QLabel("")
         self._ctx_label.setObjectName("ToolbarContext")
-        tb_layout.addWidget(self._new_session_btn)
         tb_layout.addStretch(1)
         tb_layout.addWidget(self._ctx_label)
         tb_layout.addStretch(1)
         tb_layout.addWidget(self._start_btn)
         tb_layout.addWidget(self._stop_btn)
         tb_layout.addWidget(self._term_btn)
-        tb_layout.addWidget(self._archive_btn)
-        tb_layout.addWidget(self._restore_btn)
         sa_layout.addWidget(self._toolbar)
 
         self._terminal_host = QStackedWidget()
@@ -248,6 +245,67 @@ class MainWindow(QMainWindow):
     def _on_selection_changed(self) -> None:
         self._show_selected()
         self._update_controls()
+
+    def _on_context_menu(self, pos: QPoint) -> None:
+        """Right-click menu on the tree.
+
+        Session items: Start/Stop + Terminate + Archive/Restore + Delete
+        (state-aware). Project items: Add Session + Delete Project. Selecting
+        the right-clicked item first lets the shared handlers operate on it.
+        """
+        item = self._tree.itemAt(pos)
+        if item is None:
+            return
+        self._tree.setCurrentItem(item)
+        menu = self._build_context_menu()
+        if menu is None:
+            return
+        menu.exec(self._tree.viewport().mapToGlobal(pos))
+
+    def _build_context_menu(self) -> QMenu | None:
+        """Build the right-click menu for the currently selected tree item."""
+        sid = self._selected_session_id()
+        pid = self._selected_project_id()
+        menu = QMenu(self)
+        if sid is not None:
+            sess = self._selected_session()
+            if sess is None:
+                return None
+            running = sess.state in (SessionState.RUNNING, SessionState.STARTING)
+            if running:
+                menu.addAction("Stop", lambda: self._session_action("stop"))
+                menu.addAction("Terminate", lambda: self._session_action("terminate"))
+            else:
+                menu.addAction("Start", lambda: self._session_action("start"))
+            if sess.archived:
+                menu.addAction("Restore", self._on_restore)
+            else:
+                menu.addAction("Archive", self._on_archive)
+            if not running:
+                menu.addAction("Delete", self._on_delete_session)
+        elif pid is not None:
+            menu.addAction("Add Session", self._on_new_session)
+            menu.addAction("Delete Project", self._on_delete_project)
+        else:
+            return None
+        return menu
+
+    def _selected_project_id(self) -> str | None:
+        item = self._tree.currentItem()
+        if item is None:
+            return None
+        pid = item.data(0, _PROJECT_ROLE)
+        if pid is not None:
+            return str(pid)
+        # a session node: resolve via its session's project
+        sid = item.data(0, _SESSION_ROLE)
+        if sid is not None:
+            try:
+                sess = self._service.get_session(str(sid))
+            except KeyError:
+                return None
+            return sess.project_id
+        return None
 
     def _selected_session_id(self) -> str | None:
         item = self._tree.currentItem()
@@ -343,28 +401,20 @@ class MainWindow(QMainWindow):
         self._terminal_host.setCurrentWidget(self._dyn_placeholder)
 
     def _update_controls(self) -> None:
-        proj = self._selected_project()
         sess = self._selected_session()
-        self._new_session_btn.setEnabled(proj is not None)
         if sess is None or self._adapter is None:
-            for b in (
-                self._start_btn,
-                self._stop_btn,
-                self._term_btn,
-                self._archive_btn,
-                self._restore_btn,
-            ):
+            for b in (self._start_btn, self._stop_btn, self._term_btn):
                 b.setEnabled(False)
             return
+        # Toolbar keeps Start/Stop/Terminate only; Archive/Restore/Delete/
+        # New Session/Delete Project live in the right-click context menu.
         archived = sess.archived
-        self._archive_btn.setEnabled(not archived)
-        self._restore_btn.setEnabled(archived)
+        running = sess.state in (SessionState.RUNNING, SessionState.STARTING)
         if archived:
             # archived sessions are stopped; Restore first, then Start to resume
             for b in (self._start_btn, self._stop_btn, self._term_btn):
                 b.setEnabled(False)
             return
-        running = sess.state in (SessionState.RUNNING, SessionState.STARTING)
         self._start_btn.setEnabled(not running)
         self._stop_btn.setEnabled(running)
         self._term_btn.setEnabled(running)
@@ -457,6 +507,58 @@ class MainWindow(QMainWindow):
         self._service.restore_session(sess.id)
         self._refresh_tree()
         self._select_session(sess.id)
+
+    def _on_delete_session(self) -> None:
+        sess = self._selected_session()
+        if sess is None:
+            return
+        confirm = QMessageBox.question(
+            self,
+            "Delete session",
+            f"Delete session '{sess.name}'?\n\n"
+            "This removes it from TWAT. The pi conversation file on disk is kept.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self._service.delete_session(sess.id)
+        except SessionActiveError as e:
+            _log.warning("delete session refused (active): %s", e)
+            QMessageBox.warning(self, "Cannot delete", str(e))
+            return
+        _log.info("deleted session %s via UI", sess.id)
+        self._teardown_terminal(sess.id)
+        self._refresh_tree()
+        self._show_selected()
+
+    def _on_delete_project(self) -> None:
+        proj = self._selected_project()
+        if proj is None:
+            return
+        n = len(self._service.sessions_for(proj.id))
+        confirm = QMessageBox.question(
+            self,
+            "Delete project",
+            f"Delete project '{proj.name}' and all its sessions ({n})?\n\n"
+            "Running sessions are stopped first.\n"
+            "The folder and pi conversations are NOT deleted.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        # tear down any live terminals for this project's sessions
+        for sid in [s.id for s in self._service.sessions_for(proj.id)]:
+            self._teardown_terminal(sid)
+        try:
+            self._service.delete_project(proj.id)
+        except Exception as e:  # surface errors to the user
+            QMessageBox.warning(self, "Project error", str(e))
+            return
+        self._refresh_tree()
+        self._show_selected()
 
     def _on_add_project(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Add Project Folder")
@@ -567,6 +669,18 @@ class MainWindow(QMainWindow):
                 if child is not None:
                     names.append(child.text(0))
         return names
+
+    def _context_action_texts(self) -> list[str]:
+        menu = self._build_context_menu()
+        if menu is None:
+            return []
+        return [a.text() for a in menu.actions()]
+
+    def session_context_actions(self) -> list[str]:
+        return self._context_action_texts()
+
+    def project_context_actions(self) -> list[str]:
+        return self._context_action_texts()
 
     def select_project(self, project_id: str) -> None:
         for i in range(self._tree.topLevelItemCount()):

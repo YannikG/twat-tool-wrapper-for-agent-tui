@@ -46,6 +46,14 @@ _Avoid_: delete, close
 Un-set the archived flag on a stopped session so it reappears in the active sidebar, still `exited`. Does NOT launch `pi`; the user Starts to resume the conversation.
 _Avoid_: reopen, resume (use Start)
 
+**Delete project (action)**:
+Remove a project and all of its sessions from TWAT's state. Any running sessions are gracefully Stopped first. The on-disk folder and pi Session conversation files are NEVER touched (pi owns them); only TWAT's metadata is removed. Destructive and confirmed. The folder can be re-added later.
+_Avoid_: remove project, uninstall
+
+**Delete session (action)**:
+Remove a stopped (almost always archived) session's record from TWAT's state. Only allowed when the session is not running. The pi Session conversation file is NEVER touched; only TWAT's metadata is removed. A deleted session cannot be Restored (the record is gone); to get the conversation back, re-add it via pi's own resume. Destructive and confirmed.
+_Avoid_: archive (Archive hides, Delete removes the record)
+
 **State file**:
 TWAT's single JSON persistence file in the platform config directory (`~/.config/twat/`, `~/Library/Application Support/twat/`, `%APPDATA%/twat/`). Holds projects, session metadata, and settings. Written atomically (tmp + rename). Stdlib `json`, no database.
 _Avoid_: database, store, config file (when the state file is meant)
