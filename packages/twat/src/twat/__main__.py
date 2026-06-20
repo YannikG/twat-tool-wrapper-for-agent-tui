@@ -65,6 +65,12 @@ def run() -> None:
     app.setApplicationName("TWAT")
     app.setStyle("Fusion")
 
+    from twat.ui.icon import app_icon
+
+    icon = app_icon()
+    if icon is not None:
+        app.setWindowIcon(icon)
+
     try:
         lock = acquire(cfg)
     except InstanceLockError as e:
