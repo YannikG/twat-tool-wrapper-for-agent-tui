@@ -6,7 +6,6 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 from PIL import Image
@@ -35,7 +34,10 @@ def main() -> int:
                 check=True,
                 stdout=subprocess.DEVNULL,
             )
-    subprocess.run(["iconutil", "-c", "icns", str(ICONSET), "-o", str(OUT / "icon.icns")], check=True)
+    subprocess.run(
+        ["iconutil", "-c", "icns", str(ICONSET), "-o", str(OUT / "icon.icns")],
+        check=True,
+    )
     shutil.rmtree(ICONSET)
 
     img = Image.open(PNG)
