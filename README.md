@@ -48,4 +48,4 @@ uv run python scripts/build/pyinstaller/build.py
 ```
 
 Release builds run on tag push via [`.github/workflows/release.yml`](./.github/workflows/release.yml)
-(macOS + Windows matrix).
+(four artifacts: macOS, Linux x64, Windows x64, Windows ARM64).

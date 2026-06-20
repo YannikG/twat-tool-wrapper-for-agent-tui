@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a PyInstaller bundle for TWAT (macOS .app / Windows .exe).
+"""Build a PyInstaller bundle for TWAT (macOS .app / Linux dir / Windows .exe).
 
 Run from repo root: uv run python scripts/build/pyinstaller/build.py
 Requires dev deps: uv sync --group dev

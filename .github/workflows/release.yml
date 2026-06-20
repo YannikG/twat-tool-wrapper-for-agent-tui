@@ -13,8 +13,16 @@ jobs:
         include:
           - os: macos-latest
             artifact: twat-macos
+            platform: macos
+          - os: ubuntu-latest
+            artifact: twat-linux-x64
+            platform: linux
           - os: windows-latest
-            artifact: twat-windows
+            artifact: twat-windows-x64
+            platform: windows
+          - os: windows-11-arm
+            artifact: twat-windows-arm64
+            platform: windows
 
     runs-on: ${{ matrix.os }}
 
@@ -26,12 +34,14 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Install system Qt deps (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libxkbcommon0 libdbus-1-3 libxcb-cursor0
+
       - name: Sync environment (incl. dev + pyinstaller)
         run: uv sync --group dev
-
-      - name: Install system Qt deps (Linux only, skipped on matrix)
-        if: false
-        run: echo "skipped"
 
       - name: Build PyInstaller bundle
         run: uv run python scripts/build/pyinstaller/build.py
