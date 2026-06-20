@@ -109,6 +109,11 @@ def open_in_targets() -> list[tuple[str, Callable[[str], None]]]:
             or shutil.which("gnome-terminal")
         )
         if term:
-            targets.append(("Terminal", lambda cwd, t=term: _spawn([t, cwd], "Terminal")))
+            t = term
+
+            def open_term(cwd: str, terminal: str = t) -> None:
+                _spawn([terminal, cwd], "Terminal")
+
+            targets.append(("Terminal", open_term))
 
     return targets
